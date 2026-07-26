@@ -32,11 +32,7 @@ st.markdown(
     " get AI-powered verdicts."
 )
 
-# --- Initialize Session State for Watchlist ---
-if "watchlist" not in st.session_state:
-  st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS", "INFY.NS"]
-
-# --- Sidebar Inputs & Watchlist Table ---
+# --- Sidebar Inputs ---
 st.sidebar.header("🔍 Stock Configuration")
 ticker_input = st.sidebar.text_input(
     "Enter Stock Ticker (e.g., RELIANCE.NS, TCS.NS, AAPL)",
@@ -44,55 +40,19 @@ ticker_input = st.sidebar.text_input(
 )
 stock_symbol = ticker_input.strip().upper()
 
-st.sidebar.divider()
-st.sidebar.header("⭐ Quick Watchlist Table")
-
-# Add/Remove options in sidebar
-new_sidebar_stock = st.sidebar.text_input("Add Ticker to Watchlist")
-if st.sidebar.button("Add to Watchlist"):
-  if (
-      new_sidebar_stock
-      and new_sidebar_stock.upper() not in st.session_state["watchlist"]
-  ):
-    st.session_state["watchlist"].append(new_sidebar_stock.upper())
-    st.sidebar.success(f"Added {new_sidebar_stock.upper()}!")
-
-# Render sidebar watchlist table/summary
-if st.session_state["watchlist"]:
-  watchlist_data = []
-  for item in st.session_state["watchlist"]:
-    try:
-      t_stock = yf.Ticker(item)
-      t_hist = t_stock.history(period="1d")
-      if not t_hist.empty:
-        curr = t_hist["Close"].iloc[-1]
-        watchlist_data.append({"Ticker": item, "Price (INR)": round(curr, 2)})
-      else:
-        watchlist_data.append({"Ticker": item, "Price (INR)": "N/A"})
-    except:
-      watchlist_data.append({"Ticker": item, "Price (INR)": "N/A"})
-
-  watch_df = pd.DataFrame(watchlist_data)
-  st.sidebar.dataframe(watch_df, hide_index=True, use_container_width=True)
-
-
-# --- Fetch Stock Data (Optimized to prevent caching serialization error) ---
+# --- Fetch Stock Data ---
 @st.cache_data(ttl=3600)
 def load_stock_data(symbol):
   try:
     stock = yf.Ticker(symbol)
     df = stock.history(period="6mo")
     info = stock.info
-    return df, info
+    return stock, df, info
   except Exception as e:
-    return pd.DataFrame(), {}
+    return None, pd.DataFrame(), {}
 
 
-# Load dataframe and info via safe caching
-hist_df, stock_info = load_stock_data(stock_symbol)
-
-# Initialize yfinance Ticker object separately for live properties like .news
-stock_obj = yf.Ticker(stock_symbol)
+stock_obj, hist_df, stock_info = load_stock_data(stock_symbol)
 
 # --- Navigation Tabs ---
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -119,13 +79,9 @@ with tab1:
 
     col1, col2 = st.columns(2)
     with col1:
-      target_buy = st.number_input(
-          "Your Target Buy Price (INR)", value=float(current_price * 0.95)
-      )
+      target_buy = st.number_input("Your Target Buy Price (INR)", value=float(current_price * 0.95))
     with col2:
-      target_sell = st.number_input(
-          "Your Target Sell Price (INR)", value=float(current_price * 1.10)
-      )
+      target_sell = st.number_input("Your Target Sell Price (INR)", value=float(current_price * 1.10))
 
     if st.button("Evaluate Entry/Exit"):
       if current_price <= target_buy:
@@ -178,6 +134,7 @@ with tab2:
 with tab3:
   st.subheader("🏛️ Key Fundamental Metrics")
   if stock_info:
+    # Safe data extraction to eliminate N/A errors
     raw_mcap = stock_info.get("marketCap") or stock_info.get("enterpriseValue")
     if raw_mcap:
       market_cap = f"₹ {raw_mcap / 10000000:,.2f} Cr"
@@ -220,9 +177,7 @@ with tab4:
   recommendation = stock_info.get("recommendationKey")
 
   if target_mean:
-    st.metric(
-        label="Analyst Consensus Mean Target", value=f"INR {target_mean:,.2f}"
-    )
+    st.metric(label="Analyst Consensus Mean Target", value=f"INR {target_mean:,.2f}")
   else:
     st.info("Analyst consensus target price not available.")
 
@@ -291,9 +246,12 @@ with tab6:
 # TAB 7: My Watchlist
 # ==========================================
 with tab7:
-  st.subheader("⭐ My Watchlist Management")
-  new_stock = st.text_input("Add Ticker to Watchlist (e.g. SBIN.NS)")
-  if st.button("Add to Watchlist Main"):
+  st.subheader("⭐ My Watchlist")
+  if "watchlist" not in st.session_state:
+    st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS", "INFY.NS"]
+
+  new_stock = st.text_input("Add Ticker to Watchlist")
+  if st.button("Add to Watchlist"):
     if new_stock and new_stock.upper() not in st.session_state["watchlist"]:
       st.session_state["watchlist"].append(new_stock.upper())
       st.success(f"Added {new_stock.upper()} to watchlist!")
