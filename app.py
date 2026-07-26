@@ -1,261 +1,699 @@
 import os
-from dotenv import load_dotenv
-import google.genai as genai
+import xml.etree.ElementTree as ET
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import requests
 import streamlit as st
-import yfinance as yf
+from dotenv import load_dotenv
+from google import genai
 
-# Load environment variables for local development
+# Load Gemini API key from .env file
 load_dotenv()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Configure Gemini API key securely from Streamlit Secrets or Environment Variables
-if "GEMINI_API_KEY" in st.secrets:
-  GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-else:
-  GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# Initialize Gemini Client
-if GEMINI_API_KEY:
-  client = genai.Client(api_key=GEMINI_API_KEY)
-else:
-  client = None
-
-# --- Page Configuration ---
 st.set_page_config(
-    page_title="Stock Analyzer & AI Evaluator", page_icon="📈", layout="wide"
+    page_title="AI Stock & Fundamental Analyzer", layout="wide", page_icon="📈"
 )
 
-st.title("📈 Stock Analyzer Dashboard & AI Advisor")
-st.markdown(
-    "Analyze stock fundamentals, technical indicators, news sentiment, and"
-    " get AI-powered verdicts."
+# Initialize Watchlist in Session State (Feature 2)
+if "watchlist" not in st.session_state:
+  st.session_state.watchlist = [
+      "RELIANCE.NS",
+      "TATAMOTORS.NS",
+      "SJVN.NS",
+      "AAPL",
+  ]
+
+st.title("📈 AI Stock, News & Smart Entry Evaluator")
+
+POPULAR_STOCKS = {
+    "Reliance Industries": "RELIANCE.NS",
+    "Tata Steel": "TATASTEEL.NS",
+    "Hero MotoCorp": "HEROMOTOCO.NS",
+    "SJVN Ltd": "SJVN.NS",
+    "Hindustan Copper": "HINDCOPPER.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "Tata Motors": "TATAMOTORS.NS",
+    "Infosys": "INFY.NS",
+    "State Bank of India (SBI)": "SBIN.NS",
+    "Bajaj Finance": "BAJFINANCE.NS",
+    "Jio Financial Services": "JIOFIN.NS",
+    "Apple Inc. (US)": "AAPL",
+    "Nvidia Corporation (US)": "NVDA",
+    "Tesla (US)": "TSLA",
+    "Microsoft (US)": "MSFT",
+}
+
+# ----------------- SIDEBAR -----------------
+st.sidebar.header("🔍 Quick Stock Finder")
+
+selected_company = st.sidebar.selectbox(
+    "Select a Popular Stock:",
+    options=["Custom Input"] + list(POPULAR_STOCKS.keys()),
 )
 
-# --- Sidebar Inputs ---
-st.sidebar.header("🔍 Stock Configuration")
-ticker_input = st.sidebar.text_input(
-    "Enter Stock Ticker (e.g., RELIANCE.NS, TCS.NS, AAPL)",
-    value="RELIANCE.NS",
+if selected_company != "Custom Input":
+  default_ticker = POPULAR_STOCKS[selected_company]
+else:
+  default_ticker = "RELIANCE.NS"
+
+ticker = st.sidebar.text_input(
+    "Or Enter Ticker Symbol Manually:", value=default_ticker
+).strip()
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📌 Common Stock Symbols")
+ref_df = pd.DataFrame(
+    list(POPULAR_STOCKS.items()), columns=["Company Name", "Symbol"]
 )
-stock_symbol = ticker_input.strip().upper()
+st.sidebar.dataframe(ref_df, hide_index=True, use_container_width=True)
 
-# --- Fetch Stock Data ---
-@st.cache_data(ttl=3600)
-def load_stock_data(symbol):
-  try:
-    stock = yf.Ticker(symbol)
-    df = stock.history(period="6mo")
-    info = stock.info
-    return stock, df, info
-  except Exception as e:
-    return None, pd.DataFrame(), {}
+# --- WATCHLIST MANAGER (Sidebar) ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("⭐ Watchlist Manager")
 
-
-stock_obj, hist_df, stock_info = load_stock_data(stock_symbol)
-
-# --- Navigation Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "💡 Buy/Sell Evaluator",
-    "📊 Price & Technicals",
-    "🏛️ Company Fundamentals",
-    "🎯 Brokerage Targets",
-    "📰 News & Sentiment",
-    "🤖 AI Financial Verdict",
-    "⭐ My Watchlist",
-])
-
-# ==========================================
-# TAB 1: Buy/Sell Evaluator
-# ==========================================
-with tab1:
-  st.subheader("💡 Buy / Sell Evaluator")
-  if not hist_df.empty:
-    current_price = hist_df["Close"].iloc[-1]
-    st.metric(
-        label=f"Current Price for {stock_symbol}",
-        value=f"INR {current_price:,.2f}",
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-      target_buy = st.number_input("Your Target Buy Price (INR)", value=float(current_price * 0.95))
-    with col2:
-      target_sell = st.number_input("Your Target Sell Price (INR)", value=float(current_price * 1.10))
-
-    if st.button("Evaluate Entry/Exit"):
-      if current_price <= target_buy:
-        st.success(
-            "🟢 **Good Time to Buy!** Current price is at or below your target"
-            " buy price."
-        )
-      elif current_price >= target_sell:
-        st.warning(
-            "🔴 **Consider Selling / Book Profits!** Price has reached your"
-            " target sell level."
-        )
-      else:
-        st.info(
-            "🟡 **Hold / Wait.** Current price is fluctuating between your buy"
-            " and sell targets."
-        )
+if st.sidebar.button(f"➕ Add '{ticker}' to Watchlist"):
+  if ticker not in st.session_state.watchlist:
+    st.session_state.watchlist.append(ticker)
+    st.sidebar.success(f"Added {ticker}!")
   else:
-    st.error("Could not fetch price data for the entered ticker symbol.")
+    st.sidebar.info(f"{ticker} is already in Watchlist.")
 
-# ==========================================
-# TAB 2: Price & Technicals
-# ==========================================
-with tab2:
-  st.subheader("📊 Price Chart & Technical Indicators")
-  if not hist_df.empty:
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=hist_df.index,
-            y=hist_df["Close"],
-            mode="lines",
-            name="Close Price",
-            line=dict(color="blue", width=2),
-        )
-    )
-    fig.update_layout(
-        title=f"{stock_symbol} 6-Month Price Trend",
-        xaxis_title="Date",
-        yaxis_title="Price (INR)",
-        template="plotly_dark",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-  else:
-    st.warning("No historical chart data available.")
+if st.session_state.watchlist:
+  selected_to_remove = st.sidebar.selectbox(
+      "Remove Stock:",
+      options=["Select Stock"] + st.session_state.watchlist,
+      key="remove_stock_select",
+  )
+  if selected_to_remove != "Select Stock":
+    if st.sidebar.button(f"❌ Remove {selected_to_remove}"):
+      st.session_state.watchlist.remove(selected_to_remove)
+      st.sidebar.success(f"Removed {selected_to_remove}")
+      st.rerun()
 
-# ==========================================
-# TAB 3: Company Fundamentals (FIXED N/A)
-# ==========================================
-with tab3:
-  st.subheader("🏛️ Key Fundamental Metrics")
-  if stock_info:
-    # Safe data extraction to eliminate N/A errors
-    raw_mcap = stock_info.get("marketCap") or stock_info.get("enterpriseValue")
-    if raw_mcap:
-      market_cap = f"₹ {raw_mcap / 10000000:,.2f} Cr"
-    else:
-      market_cap = "N/A"
 
-    raw_pe = stock_info.get("trailingPE") or stock_info.get("forwardPE")
-    pe_ratio = round(float(raw_pe), 2) if raw_pe else "N/A"
-
-    high_52 = stock_info.get("fiftyTwoWeekHigh")
-    high_52_str = f"INR {high_52:,.2f}" if high_52 else "N/A"
-
-    low_52 = stock_info.get("fiftyTwoWeekLow")
-    low_52_str = f"INR {low_52:,.2f}" if low_52 else "N/A"
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-      st.metric(label="Market Capitalization", value=market_cap)
-      st.metric(label="P/E Ratio", value=pe_ratio)
-    with col2:
-      st.metric(label="52-Week High", value=high_52_str)
-      st.metric(label="52-Week Low", value=low_52_str)
-    with col3:
-      div_yield = stock_info.get("dividendYield")
-      div_yield_str = (
-          f"{float(div_yield) * 100:.2f}%" if div_yield else "N/A"
+# ----------------- DATA FETCHERS -----------------
+def fetch_stock_chart(symbol):
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
       )
-      st.metric(label="Dividend Yield", value=div_yield_str)
-  else:
-    st.warning(
-        "Fundamental data is currently unavailable for this specific ticker."
-    )
+  }
+  url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1y&interval=1d"
+  response = requests.get(url, headers=headers)
 
-# ==========================================
-# TAB 4: Brokerage Targets
-# ==========================================
-with tab4:
-  st.subheader("🎯 Brokerage Targets & Recommendations")
-  target_mean = stock_info.get("targetMeanPrice")
-  recommendation = stock_info.get("recommendationKey")
+  if response.status_code != 200:
+    return None, None
 
-  if target_mean:
-    st.metric(label="Analyst Consensus Mean Target", value=f"INR {target_mean:,.2f}")
-  else:
-    st.info("Analyst consensus target price not available.")
+  data = response.json().get("chart", {}).get("result")
+  if not data:
+    return None, None
 
-  if recommendation:
-    st.info(f"**Brokerage Consensus Rating:** `{recommendation.upper()}`")
-  else:
-    st.info("No active brokerage recommendations found.")
+  chart_data = data[0]
+  timestamps = chart_data.get("timestamp", [])
+  quote = chart_data.get("indicators", {}).get("quote", [{}])[0]
+  meta = chart_data.get("meta", {})
 
-# ==========================================
-# TAB 5: News & Sentiment
-# ==========================================
-with tab5:
-  st.subheader("📰 Recent News Headlines & AI Sentiment")
+  if not timestamps:
+    return None, None
+
+  df = pd.DataFrame({
+      "Date": pd.to_datetime(timestamps, unit="s"),
+      "Open": quote.get("open"),
+      "High": quote.get("high"),
+      "Low": quote.get("low"),
+      "Close": quote.get("close"),
+  }).dropna()
+
+  # Moving Averages
+  df["SMA_50"] = df["Close"].rolling(window=50).mean()
+  df["SMA_200"] = df["Close"].rolling(window=200).mean()
+
+  # RSI (14 Days)
+  delta = df["Close"].diff()
+  gain = delta.clip(lower=0).rolling(window=14).mean()
+  loss = (-delta.clip(upper=0)).rolling(window=14).mean()
+  rs = gain / loss
+  df["RSI_14"] = 100 - (100 / (1 + rs))
+
+  # Feature 1: Bollinger Bands (20-day SMA, 2 Std Dev)
+  df["BB_Middle"] = df["Close"].rolling(window=20).mean()
+  df["BB_Std"] = df["Close"].rolling(window=20).std()
+  df["BB_Upper"] = df["BB_Middle"] + (df["BB_Std"] * 2)
+  df["BB_Lower"] = df["BB_Middle"] - (df["BB_Std"] * 2)
+
+  # Feature 1: MACD Calculation (12 EMA, 26 EMA, 9 Signal)
+  exp1 = df["Close"].ewm(span=12, adjust=False).mean()
+  exp2 = df["Close"].ewm(span=26, adjust=False).mean()
+  df["MACD"] = exp1 - exp2
+  df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+  df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
+
+  return df, meta
+
+
+def fetch_brokerage_summary(symbol):
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      )
+  }
+  modules = "financialData,upgradeDowngradeHistory,summaryDetail,price,defaultKeyStatistics"
+  url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{symbol}?modules={modules}"
+
   try:
-    news_list = stock_obj.news if stock_obj else []
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+      res = response.json().get("quoteSummary", {}).get("result", [{}])[0]
+      return res
   except Exception:
-    news_list = []
+    pass
+  return {}
 
-  if news_list:
-    for item in news_list[:5]:
-      title = item.get("title", "No Title")
-      publisher = item.get("publisher", "Unknown Source")
-      link = item.get("link", "#")
-      st.markdown(f"- [{title}]({link}) — *{publisher}*")
 
-    if st.button("Analyze News Sentiment ✨"):
-      if client:
-        with st.spinner("Analyzing sentiment with Gemini AI..."):
-          headlines_text = "\n".join(
-              [n.get("title", "") for n in news_list[:5]]
-          )
-          prompt = (
-              "Analyze the market sentiment (Bullish, Bearish, or Neutral) for"
-              f" these headlines:\n{headlines_text}"
-          )
-          response = client.models.generate_content(
-              model="gemini-2.5-flash", contents=prompt
-          )
-          st.success("### AI News Sentiment Report")
-          st.write(response.text)
+def fetch_stock_news(search_term):
+  url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
+  headers = {
+      "User-Agent": (
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      )
+  }
+  news_items = []
+
+  try:
+    resp = requests.get(url, headers=headers, timeout=10)
+    if resp.status_code == 200:
+      root = ET.fromstring(resp.content)
+      for item in root.findall(".//item")[:7]:
+        title = item.find("title").text if item.find("title") is not None else ""
+        link = item.find("link").text if item.find("link") is not None else ""
+        pub_date = (
+            item.find("pubDate").text
+            if item.find("pubDate") is not None
+            else ""
+        )
+        news_items.append({"title": title, "link": link, "date": pub_date})
+  except Exception:
+    pass
+
+  return news_items
+
+
+def evaluate_custom_buy_price(
+    ticker_sym, user_price, curr_price, target_mean, rsi, pe, key
+):
+  try:
+    client = genai.Client(api_key=key)
+    prompt = f"""
+        Act as a professional Stock Trader & Risk Manager.
+        User wants to buy the stock '{ticker_sym}' at price: {user_price}
+        
+        Stock Current Market Data:
+        - Live Market Price: {curr_price}
+        - Analyst Target Price: {target_mean}
+        - RSI (14 Days): {rsi}
+        - P/E Ratio: {pe}
+        
+        Answer clearly in simple Hinglish (mix of Hindi + English):
+        1. **Verdict**: Should the user buy at {user_price}? (GOOD ENTRY / RISKY / WAIT FOR DIP)
+        2. **Risk to Reward Ratio**: Evaluate if buying at {user_price} leaves enough profit upside compared to the Brokerage Target ({target_mean}).
+        3. **Suggested Entry Zone & Stop Loss**: Give a clear suggested buying range and strict stop-loss price.
+        Keep it direct and actionable with bullet points.
+        """
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents=prompt
+    )
+    return response.text
+  except Exception as e:
+    return f"AI Evaluation Error: {e}"
+
+
+def analyze_news_sentiment(news_list, key):
+  try:
+    client = genai.Client(api_key=key)
+    headlines = "\n".join([f"- {n['title']}" for n in news_list])
+    prompt = f"""
+        Analyze these recent news headlines for a stock:
+        {headlines}
+        
+        Provide a response in simple Hinglish:
+        1. Overall News Sentiment: (BULLISH 🟢 / BEARISH 🔴 / NEUTRAL 🟡)
+        2. Key Market Catalysts or Deals mentioned.
+        3. Short-term price impact.
+        """
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents=prompt
+    )
+    return response.text
+  except Exception as e:
+    return f"AI Sentiment Error: {e}"
+
+
+def get_ai_analysis(ticker_sym, curr_price, target_mean, rec_key, rsi, pe, key):
+  try:
+    client = genai.Client(api_key=key)
+    prompt = f"""
+        Act as a top stock analyst. Analyze '{ticker_sym}'.
+        - Current Price: {curr_price}
+        - Target Price: {target_mean}
+        - Consensus Rating: {rec_key}
+        - RSI: {rsi}
+        - P/E: {pe}
+        
+        Provide a research report in Hinglish:
+        1. Verdict (BUY / HOLD / SELL)
+        2. Valuation check (P/E & RSI)
+        3. Target & Key Risks.
+        """
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents=prompt
+    )
+    return response.text
+  except Exception as e:
+    return f"AI Generation Error: {e}"
+
+
+def format_market_cap(val, symbol):
+  if val == "N/A" or not isinstance(val, (int, float)):
+    return "N/A"
+  if val >= 1e12:
+    return (
+        f"₹{val / 1e12:.2f} Lakh Cr" if "NS" in symbol else f"${val / 1e12:.2f}T"
+    )
+  elif val >= 1e7 and "NS" in symbol:
+    return f"₹{val / 1e7:.2f} Cr"
+  elif val >= 1e9:
+    return f"${val / 1e9:.2f}B"
+  return f"{val}"
+
+
+# ----------------- MAIN UI -----------------
+analyze_btn = st.sidebar.button("Analyze Stock 🚀")
+
+if analyze_btn or ticker:
+  if ticker:
+    with st.spinner(f"Fetching Data, Fundamentals & News for {ticker}..."):
+      df, meta = fetch_stock_chart(ticker)
+      summary_data = fetch_brokerage_summary(ticker)
+      clean_symbol = ticker.replace(".NS", "")
+      news_data = fetch_stock_news(clean_symbol)
+
+      if df is None or df.empty:
+        st.error(f"'{ticker}' ka Data nahi mila! Please check symbol.")
       else:
-        st.error("Gemini API Key is missing or invalid.")
-  else:
-    st.info("No recent news found for this ticker.")
+        fin_data = summary_data.get("financialData", {})
+        summary_detail = summary_data.get("summaryDetail", {})
+        price_data = summary_data.get("price", {})
 
-# ==========================================
-# TAB 6: AI Financial Verdict
-# ==========================================
-with tab6:
-  st.subheader("🤖 Comprehensive AI Financial Verdict")
-  if st.button("Generate Complete AI Verdict 🚀"):
-    if client:
-      with st.spinner("Synthesizing stock metrics and generating AI verdict..."):
-        prompt = (
-            f"Provide a comprehensive financial verdict for stock {stock_symbol}"
-            f" with current price data, fundamentals summary, and risk analysis."
+        curr_price = float(
+            meta.get("regularMarketPrice", df["Close"].iloc[-1])
         )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt
+
+        if len(df) > 1:
+          prev_close = meta.get("chartPreviousClose", df["Close"].iloc[-2])
+        else:
+          prev_close = meta.get("chartPreviousClose", curr_price)
+
+        change = curr_price - prev_close
+        pct_change = (change / prev_close * 100) if prev_close != 0 else 0
+        currency = meta.get("currency", "INR")
+
+        target_mean = fin_data.get("targetMeanPrice", {}).get("raw", "N/A")
+        rec_key = fin_data.get("recommendationKey", "N/A").upper()
+
+        latest_rsi = (
+            f"{df['RSI_14'].iloc[-1]:.1f}"
+            if not pd.isna(df["RSI_14"].iloc[-1])
+            else "N/A"
         )
-        st.markdown(response.text)
-    else:
-      st.error("Gemini API Client is not configured properly.")
 
-# ==========================================
-# TAB 7: My Watchlist
-# ==========================================
-with tab7:
-  st.subheader("⭐ My Watchlist")
-  if "watchlist" not in st.session_state:
-    st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS", "INFY.NS"]
+        pe_ratio = summary_detail.get("trailingPE", {}).get(
+            "raw", fin_data.get("forwardPE", {}).get("raw", "N/A")
+        )
+        pe_str = (
+            f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
+        )
 
-  new_stock = st.text_input("Add Ticker to Watchlist")
-  if st.button("Add to Watchlist"):
-    if new_stock and new_stock.upper() not in st.session_state["watchlist"]:
-      st.session_state["watchlist"].append(new_stock.upper())
-      st.success(f"Added {new_stock.upper()} to watchlist!")
+        mcap_raw = price_data.get("marketCap", {}).get("raw", "N/A")
+        mcap_str = format_market_cap(mcap_raw, ticker)
 
-  st.write("**Current Tracked Stocks:**")
-  for item in st.session_state["watchlist"]:
-    st.markdown(f"- 📊 `{item}`")
+        # Top Metrics
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("Current Price", f"{currency} {curr_price:.2f}")
+        c2.metric("1-Day Change", f"{change:+.2f} ({pct_change:+.2f}%)")
+        c3.metric("Market Cap", mcap_str)
+        c4.metric("P/E Ratio", pe_str)
+        c5.metric("RSI (14)", latest_rsi)
+        c6.metric("Brokerage Target", f"{currency} {target_mean}")
+
+        st.markdown("---")
+
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "💡 Buy/Sell Evaluator",
+            "📊 Price & Technicals",
+            "🏛️ Company Fundamentals",
+            "🎯 Brokerage Targets",
+            "📰 News & Sentiment",
+            "🤖 AI Financial Verdict",
+            "⭐ My Watchlist",
+        ])
+
+        # TAB 1: BUY/SELL EVALUATOR
+        with tab1:
+          st.subheader("🎯 Custom Entry Price & Buy/Sell Evaluator")
+          st.caption(
+              "Yahan aap jis price par stock buy karna chahte ho woh daal kar AI"
+              " se entry signal check kar sakte ho."
+          )
+
+          col_input, col_eval = st.columns([0.4, 0.6])
+
+          with col_input:
+            user_buy_price = st.number_input(
+                f"Enter your Buying Target Price ({currency}):",
+                min_value=0.0,
+                value=float(curr_price),
+                step=1.0,
+            )
+
+            diff_from_current = (
+                (user_buy_price - curr_price) / curr_price
+            ) * 100
+
+            st.write(f"**Live Market Price:** {currency} {curr_price:.2f}")
+            if diff_from_current < 0:
+              st.info(
+                  f"📉 Your target is **{abs(diff_from_current):.2f}% LOWER**"
+                  " than current price (Buying at a Dip)."
+              )
+            elif diff_from_current > 0:
+              st.warning(
+                  f"📈 Your target is **{diff_from_current:.2f}% HIGHER** than"
+                  " current price (Buying at a Premium)."
+              )
+            else:
+              st.write(
+                  "ℹ️ Target is equal to Current Price (Immediate Entry)."
+              )
+
+            if isinstance(target_mean, (int, float)):
+              potential_gain = (
+                  (target_mean - user_buy_price) / user_buy_price
+              ) * 100
+              st.metric(
+                  "Potential Gain (Till Analyst Target)",
+                  f"{potential_gain:+.2f}%",
+              )
+
+            eval_btn = st.button("Evaluate Entry Signal 🚀")
+
+          with col_eval:
+            if eval_btn:
+              if GEMINI_API_KEY:
+                with st.spinner("Analyzing risk/reward ratio for your price..."):
+                  eval_report = evaluate_custom_buy_price(
+                      ticker,
+                      user_buy_price,
+                      curr_price,
+                      target_mean,
+                      latest_rsi,
+                      pe_str,
+                      GEMINI_API_KEY,
+                  )
+                  st.markdown("### 🤖 Entry Signal Report")
+                  st.markdown(eval_report)
+              else:
+                st.error("`.env` file me GEMINI_API_KEY set nahi hai.")
+            else:
+              st.info(
+                  "👈 Left side par price enter karke **'Evaluate Entry"
+                  " Signal'** button par click karein."
+              )
+
+        # TAB 2: ADVANCED TECHNICALS (FEATURE 1)
+        with tab2:
+          st.subheader(
+              "📊 Advanced Technical Chart (Bollinger Bands, RSI & MACD)"
+          )
+
+          fig = make_subplots(
+              rows=3,
+              cols=1,
+              shared_xaxes=True,
+              vertical_spacing=0.05,
+              row_heights=[0.5, 0.25, 0.25],
+              subplot_titles=(
+                  "Price, SMA & Bollinger Bands",
+                  "RSI (14)",
+                  "MACD (12, 26, 9)",
+              ),
+          )
+
+          # Row 1: Price + BB
+          fig.add_trace(
+              go.Candlestick(
+                  x=df["Date"],
+                  open=df["Open"],
+                  high=df["High"],
+                  low=df["Low"],
+                  close=df["Close"],
+                  name="Price",
+              ),
+              row=1,
+              col=1,
+          )
+          fig.add_trace(
+              go.Scatter(
+                  x=df["Date"],
+                  y=df["BB_Upper"],
+                  line=dict(color="rgba(173, 216, 230, 0.5)", width=1),
+                  name="BB Upper",
+              ),
+              row=1,
+              col=1,
+          )
+          fig.add_trace(
+              go.Scatter(
+                  x=df["Date"],
+                  y=df["BB_Lower"],
+                  line=dict(color="rgba(173, 216, 230, 0.5)", width=1),
+                  fill="tonexty",
+                  fillcolor="rgba(173, 216, 230, 0.1)",
+                  name="BB Lower",
+              ),
+              row=1,
+              col=1,
+          )
+          fig.add_trace(
+              go.Scatter(
+                  x=df["Date"],
+                  y=df["SMA_50"],
+                  line=dict(color="orange", width=1.2),
+                  name="50 SMA",
+              ),
+              row=1,
+              col=1,
+          )
+          fig.add_trace(
+              go.Scatter(
+                  x=df["Date"],
+                  y=df["SMA_200"],
+                  line=dict(color="cyan", width=1.2),
+                  name="200 SMA",
+              ),
+              row=1,
+              col=1,
+          )
+
+          # Row 2: RSI
+          fig.add_trace(
+              go.Scatter(
+                  x=df["Date"],
+                  y=df["RSI_14"],
+                  line=dict(color="purple", width=1.5),
+                  name="RSI",
+              ),
+              row=2,
+              col=1,
+          )
+          fig.add_hline(
+              y=70, line_dash="dash", line_color="red", row=2, col=1
+          )
+          fig.add_hline(
+              y=30, line_dash="dash", line_color="green", row=2, col=1
+          )
+
+          # Row 3: MACD
+          fig.add_trace(
+              go.Scatter(
+                  x=df["Date"],
+                  y=df["MACD"],
+                  line=dict(color="blue", width=1.5),
+                  name="MACD",
+              ),
+              row=3,
+              col=1,
+          )
+          fig.add_trace(
+              go.Scatter(
+                  x=df["Date"],
+                  y=df["MACD_Signal"],
+                  line=dict(color="orange", width=1.5, dash="dot"),
+                  name="Signal",
+              ),
+              row=3,
+              col=1,
+          )
+
+          colors = ["green" if val >= 0 else "red" for val in df["MACD_Hist"]]
+          fig.add_trace(
+              go.Bar(
+                  x=df["Date"],
+                  y=df["MACD_Hist"],
+                  marker_color=colors,
+                  name="Histogram",
+              ),
+              row=3,
+              col=1,
+          )
+
+          fig.update_layout(
+              xaxis_rangeslider_visible=False,
+              template="plotly_dark",
+              height=750,
+          )
+          st.plotly_chart(fig, use_container_width=True)
+
+        # TAB 3: FUNDAMENTALS
+        with tab3:
+          st.subheader("🏛️ Key Fundamental Metrics")
+          f1, f2, f3 = st.columns(3)
+          with f1:
+            st.markdown(f"**Market Capitalization:** `{mcap_str}`")
+            st.markdown(f"**P/E Ratio:** `{pe_str}`")
+          with f2:
+            high_52 = summary_detail.get("fiftyTwoWeekHigh", {}).get(
+                "raw", "N/A"
+            )
+            low_52 = summary_detail.get("fiftyTwoWeekLow", {}).get("raw", "N/A")
+            st.markdown(f"**52-Week High:** {currency} {high_52}")
+            st.markdown(f"**52-Week Low:** {currency} {low_52}")
+          with f3:
+            roe = fin_data.get("returnOnEquity", {}).get("raw", "N/A")
+            st.markdown(
+                f"**ROE:**"
+                f" `{roe * 100:.2f}%`"
+                if isinstance(roe, (int, float))
+                else "N/A"
+            )
+
+        # TAB 4: BROKERAGE TARGETS
+        with tab4:
+          st.subheader("🎯 Brokerage Firm Targets")
+          target_high = fin_data.get("targetHighPrice", {}).get("raw", "N/A")
+          target_low = fin_data.get("targetLowPrice", {}).get("raw", "N/A")
+          st.write(
+              f"**Mean Target:** {currency} {target_mean} | **High Target:**"
+              f" {currency} {target_high} | **Low Target:** {currency}"
+              f" {target_low}"
+          )
+
+        # TAB 5: NEWS & SENTIMENT
+        with tab5:
+          st.subheader(f"📰 Recent News Headlines for {clean_symbol}")
+          if news_data:
+            col_news, col_ai = st.columns([0.55, 0.45])
+            with col_news:
+              for item in news_data:
+                st.markdown(f"**[{item['title']}]({item['link']})**")
+                st.caption(f"📅 {item['date']}")
+                st.markdown("---")
+            with col_ai:
+              st.subheader("🧠 AI News Sentiment")
+              if GEMINI_API_KEY:
+                if st.button("Analyze News Sentiment ✨"):
+                  with st.spinner("Analyzing news..."):
+                    sentiment_report = analyze_news_sentiment(
+                        news_data, GEMINI_API_KEY
+                    )
+                    st.markdown(sentiment_report)
+          else:
+            st.info("No recent news found.")
+
+        # TAB 6: AI VERDICT
+        with tab6:
+          st.subheader("🤖 AI Agent Summary & Verdict")
+          if GEMINI_API_KEY:
+            if st.button("Generate Complete AI Verdict ✨"):
+              report = get_ai_analysis(
+                  ticker,
+                  curr_price,
+                  target_mean,
+                  rec_key,
+                  latest_rsi,
+                  pe_str,
+                  GEMINI_API_KEY,
+              )
+              st.markdown(report)
+
+        # TAB 7: WATCHLIST TRACKER (FEATURE 2)
+        with tab7:
+          st.subheader("⭐ Your Personal Watchlist Tracker")
+          st.caption(
+              "Real-time tracking for your favorite stocks in this session."
+          )
+
+          if not st.session_state.watchlist:
+            st.info("Aapki watchlist khali hai. Sidebar se stocks add karein!")
+          else:
+            watchlist_data = []
+            with st.spinner("Updating Watchlist Prices..."):
+              for item in st.session_state.watchlist:
+                w_df, w_meta = fetch_stock_chart(item)
+                if w_df is not None and not w_df.empty:
+                  w_curr = float(
+                      w_meta.get("regularMarketPrice", w_df["Close"].iloc[-1])
+                  )
+                  w_prev = float(
+                      w_meta.get(
+                          "chartPreviousClose",
+                          (
+                              w_df["Close"].iloc[-2]
+                              if len(w_df) > 1
+                              else w_curr
+                          ),
+                      )
+                  )
+                  w_change = w_curr - w_prev
+                  w_pct = (w_change / w_prev * 100) if w_prev != 0 else 0
+
+                  watchlist_data.append({
+                      "Symbol": item,
+                      "Price": f"{w_meta.get('currency', 'INR')} {w_curr:.2f}",
+                      "Day Change": f"{w_change:+.2f}",
+                      "Change (%)": f"{w_pct:+.2f}%",
+                      "50-SMA Status": (
+                          "Bullish 🟢"
+                          if w_curr > w_df["SMA_50"].iloc[-1]
+                          else "Bearish 🔴"
+                      ),
+                  })
+
+            if watchlist_data:
+              w_df_display = pd.DataFrame(watchlist_data)
+              st.dataframe(
+                  w_df_display, use_container_width=True, hide_index=True
+              )
+
+              st.markdown("---")
+              st.markdown("### 📊 Watchlist Live Summary Cards")
+              cols = st.columns(min(len(watchlist_data), 4))
+              for idx, stock in enumerate(watchlist_data[:4]):
+                with cols[idx]:
+                  st.metric(
+                      label=stock["Symbol"],
+                      value=stock["Price"],
+                      delta=f"{stock['Change (%)']}",
+                  )
