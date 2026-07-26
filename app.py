@@ -32,7 +32,11 @@ st.markdown(
     " get AI-powered verdicts."
 )
 
-# --- Sidebar Inputs ---
+# --- Initialize Session State for Watchlist ---
+if "watchlist" not in st.session_state:
+  st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS", "INFY.NS"]
+
+# --- Sidebar Inputs & Watchlist Table ---
 st.sidebar.header("🔍 Stock Configuration")
 ticker_input = st.sidebar.text_input(
     "Enter Stock Ticker (e.g., RELIANCE.NS, TCS.NS, AAPL)",
@@ -40,8 +44,39 @@ ticker_input = st.sidebar.text_input(
 )
 stock_symbol = ticker_input.strip().upper()
 
+st.sidebar.divider()
+st.sidebar.header("⭐ Quick Watchlist Table")
 
-# --- Fetch Stock Data (Updated to prevent caching serialization error) ---
+# Add/Remove options in sidebar
+new_sidebar_stock = st.sidebar.text_input("Add Ticker to Watchlist")
+if st.sidebar.button("Add to Watchlist"):
+  if (
+      new_sidebar_stock
+      and new_sidebar_stock.upper() not in st.session_state["watchlist"]
+  ):
+    st.session_state["watchlist"].append(new_sidebar_stock.upper())
+    st.sidebar.success(f"Added {new_sidebar_stock.upper()}!")
+
+# Render sidebar watchlist table/summary
+if st.session_state["watchlist"]:
+  watchlist_data = []
+  for item in st.session_state["watchlist"]:
+    try:
+      t_stock = yf.Ticker(item)
+      t_hist = t_stock.history(period="1d")
+      if not t_hist.empty:
+        curr = t_hist["Close"].iloc[-1]
+        watchlist_data.append({"Ticker": item, "Price (INR)": round(curr, 2)})
+      else:
+        watchlist_data.append({"Ticker": item, "Price (INR)": "N/A"})
+    except:
+      watchlist_data.append({"Ticker": item, "Price (INR)": "N/A"})
+
+  watch_df = pd.DataFrame(watchlist_data)
+  st.sidebar.dataframe(watch_df, hide_index=True, use_container_width=True)
+
+
+# --- Fetch Stock Data (Optimized to prevent caching serialization error) ---
 @st.cache_data(ttl=3600)
 def load_stock_data(symbol):
   try:
@@ -143,7 +178,6 @@ with tab2:
 with tab3:
   st.subheader("🏛️ Key Fundamental Metrics")
   if stock_info:
-    # Safe data extraction to eliminate N/A errors
     raw_mcap = stock_info.get("marketCap") or stock_info.get("enterpriseValue")
     if raw_mcap:
       market_cap = f"₹ {raw_mcap / 10000000:,.2f} Cr"
@@ -257,12 +291,9 @@ with tab6:
 # TAB 7: My Watchlist
 # ==========================================
 with tab7:
-  st.subheader("⭐ My Watchlist")
-  if "watchlist" not in st.session_state:
-    st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS", "INFY.NS"]
-
-  new_stock = st.text_input("Add Ticker to Watchlist")
-  if st.button("Add to Watchlist"):
+  st.subheader("⭐ My Watchlist Management")
+  new_stock = st.text_input("Add Ticker to Watchlist (e.g. SBIN.NS)")
+  if st.button("Add to Watchlist Main"):
     if new_stock and new_stock.upper() not in st.session_state["watchlist"]:
       st.session_state["watchlist"].append(new_stock.upper())
       st.success(f"Added {new_stock.upper()} to watchlist!")
