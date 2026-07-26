@@ -40,19 +40,24 @@ ticker_input = st.sidebar.text_input(
 )
 stock_symbol = ticker_input.strip().upper()
 
-# --- Fetch Stock Data ---
+
+# --- Fetch Stock Data (Fixed Caching Structure) ---
 @st.cache_data(ttl=3600)
 def load_stock_data(symbol):
   try:
     stock = yf.Ticker(symbol)
     df = stock.history(period="6mo")
     info = stock.info
-    return stock, df, info
+    return df, info
   except Exception as e:
-    return None, pd.DataFrame(), {}
+    return pd.DataFrame(), {}
 
 
-stock_obj, hist_df, stock_info = load_stock_data(stock_symbol)
+# Load data safely avoiding un-cacheable objects
+hist_df, stock_info = load_stock_data(stock_symbol)
+
+# Separate object creation for news/methods usage
+stock_obj = yf.Ticker(stock_symbol)
 
 # --- Navigation Tabs ---
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
@@ -79,9 +84,13 @@ with tab1:
 
     col1, col2 = st.columns(2)
     with col1:
-      target_buy = st.number_input("Your Target Buy Price (INR)", value=float(current_price * 0.95))
+      target_buy = st.number_input(
+          "Your Target Buy Price (INR)", value=float(current_price * 0.95)
+      )
     with col2:
-      target_sell = st.number_input("Your Target Sell Price (INR)", value=float(current_price * 1.10))
+      target_sell = st.number_input(
+          "Your Target Sell Price (INR)", value=float(current_price * 1.10)
+      )
 
     if st.button("Evaluate Entry/Exit"):
       if current_price <= target_buy:
@@ -134,7 +143,6 @@ with tab2:
 with tab3:
   st.subheader("🏛️ Key Fundamental Metrics")
   if stock_info:
-    # Safe data extraction to eliminate N/A errors
     raw_mcap = stock_info.get("marketCap") or stock_info.get("enterpriseValue")
     if raw_mcap:
       market_cap = f"₹ {raw_mcap / 10000000:,.2f} Cr"
@@ -177,7 +185,9 @@ with tab4:
   recommendation = stock_info.get("recommendationKey")
 
   if target_mean:
-    st.metric(label="Analyst Consensus Mean Target", value=f"INR {target_mean:,.2f}")
+    st.metric(
+        label="Analyst Consensus Mean Target", value=f"INR {target_mean:,.2f}"
+    )
   else:
     st.info("Analyst consensus target price not available.")
 
