@@ -579,7 +579,7 @@ if analyze_btn or ticker:
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-            # TAB 3: FUNDAMENTALS (FIXED & POPULATED)
+            # TAB 3: FUNDAMENTALS
             with tab3:
                 st.subheader("🏛️ Key Fundamental Metrics")
                 f1, f2, f3 = st.columns(3)
@@ -623,17 +623,76 @@ if analyze_btn or ticker:
                         else f"**Profit Margin:** `{profit_margins}`"
                     )
 
-            # TAB 4: BROKERAGE TARGETS
+            # TAB 4: BROKERAGE TARGETS (UPDATED WITH FIRM NAMES)
             with tab4:
-                st.subheader("🎯 Brokerage Firm Targets")
+                st.subheader("🎯 Brokerage Firm Targets & Recommendations")
+
                 target_high = info.get("targetHighPrice", "N/A")
                 target_low = info.get("targetLowPrice", "N/A")
+                num_analysts = info.get("numberOfAnalystOpinions", "N/A")
+
                 st.write(
                     f"**Mean Target:** {currency} {target_mean} | **High"
                     f" Target:** {currency} {target_high} | **Low Target:**"
                     f" {currency} {target_low}"
                 )
-                st.write(f"**Consensus Recommendation:** `{rec_key}`")
+                st.write(
+                    f"**Consensus Recommendation:** `{rec_key}` (Total Analysts:"
+                    f" **{num_analysts}**)"
+                )
+
+                st.markdown("---")
+                st.markdown("### 🏢 Recent Brokerage Firm Upgrades & Downgrades")
+
+                try:
+                    stock_obj = yf.Ticker(ticker)
+                    upgrades = stock_obj.upgrades_downgrades
+
+                    if upgrades is not None and not upgrades.empty:
+                        df_upgrades = upgrades.reset_index().head(12)
+
+                        cols_available = [
+                            col
+                            for col in [
+                                "GradeDate",
+                                "Firm",
+                                "ToGrade",
+                                "FromGrade",
+                                "Action",
+                            ]
+                            if col in df_upgrades.columns
+                        ]
+
+                        df_display = df_upgrades[cols_available].copy()
+
+                        if "GradeDate" in df_display.columns:
+                            df_display["GradeDate"] = pd.to_datetime(
+                                df_display["GradeDate"]
+                            ).dt.strftime("%Y-%m-%d")
+
+                        df_display.rename(
+                            columns={
+                                "GradeDate": "Date",
+                                "Firm": "Brokerage Firm Name",
+                                "ToGrade": "New Rating",
+                                "FromGrade": "Old Rating",
+                                "Action": "Action Taken",
+                            },
+                            inplace=True,
+                        )
+
+                        st.dataframe(
+                            df_display,
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        st.info(
+                            f"⚠️ Direct analyst firm breakdown is not available"
+                            f" in Yahoo's free database for '{ticker}'."
+                        )
+                except Exception as e:
+                    st.error(f"Error fetching firm list: {e}")
 
             # TAB 5: NEWS & SENTIMENT
             with tab5:
