@@ -623,7 +623,7 @@ if analyze_btn or ticker:
                         else f"**Profit Margin:** `{profit_margins}`"
                     )
 
-            # TAB 4: BROKERAGE TARGETS (UPDATED WITH FIRM NAMES)
+           # TAB 4: BROKERAGE TARGETS & NEWS REPORTS
             with tab4:
                 st.subheader("🎯 Brokerage Firm Targets & Recommendations")
 
@@ -642,15 +642,15 @@ if analyze_btn or ticker:
                 )
 
                 st.markdown("---")
-                st.markdown("### 🏢 Recent Brokerage Firm Upgrades & Downgrades")
+                st.markdown("### 🏢 Recent Brokerage Firm Reports & News")
 
+                # 1. Try Yahoo Finance Data First
+                has_yahoo_data = False
                 try:
                     stock_obj = yf.Ticker(ticker)
                     upgrades = stock_obj.upgrades_downgrades
-
                     if upgrades is not None and not upgrades.empty:
-                        df_upgrades = upgrades.reset_index().head(12)
-
+                        df_upgrades = upgrades.reset_index().head(10)
                         cols_available = [
                             col
                             for col in [
@@ -662,14 +662,11 @@ if analyze_btn or ticker:
                             ]
                             if col in df_upgrades.columns
                         ]
-
                         df_display = df_upgrades[cols_available].copy()
-
                         if "GradeDate" in df_display.columns:
                             df_display["GradeDate"] = pd.to_datetime(
                                 df_display["GradeDate"]
                             ).dt.strftime("%Y-%m-%d")
-
                         df_display.rename(
                             columns={
                                 "GradeDate": "Date",
@@ -680,19 +677,38 @@ if analyze_btn or ticker:
                             },
                             inplace=True,
                         )
-
                         st.dataframe(
                             df_display,
                             use_container_width=True,
                             hide_index=True,
                         )
+                        has_yahoo_data = True
+                except Exception:
+                    pass
+
+                # 2. Fallback: Search Specific Brokerage Targets via News
+                if not has_yahoo_data:
+                    st.info(
+                        f"⚡ Yahoo Direct API पर '{ticker}' का Breakdown नहीं"
+                        " मिला। News & Media से Brokerage Updates fetch किए जा"
+                        " रहे हैं:"
+                    )
+
+                    brokerage_news = fetch_stock_news(
+                        f"{clean_symbol}+brokerage+target+rating"
+                    )
+
+                    if brokerage_news:
+                        for item in brokerage_news[:5]:
+                            st.markdown(
+                                f"📌 **[{item['title']}]({item['link']})**"
+                            )
+                            st.caption(f"🗓️ Published: {item['date']}")
+                            st.markdown("---")
                     else:
-                        st.info(
-                            f"⚠️ Direct analyst firm breakdown is not available"
-                            f" in Yahoo's free database for '{ticker}'."
+                        st.warning(
+                            "कोई हालिया Brokerage Target Report नहीं मिली।"
                         )
-                except Exception as e:
-                    st.error(f"Error fetching firm list: {e}")
 
             # TAB 5: NEWS & SENTIMENT
             with tab5:
