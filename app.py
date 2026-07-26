@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 import google.genai as genai
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -28,8 +29,8 @@ st.set_page_config(
 
 st.title("📈 Stock Analyzer Dashboard & AI Advisor")
 st.markdown(
-    "Analyze stock fundamentals, technical indicators, news sentiment, and"
-    " get AI-powered verdicts."
+    "Analyze stock fundamentals, advanced technical indicators, news sentiment,"
+    " and get AI-powered verdicts."
 )
 
 # --- Sidebar Inputs ---
@@ -41,7 +42,7 @@ ticker_input = st.sidebar.text_input(
 stock_symbol = ticker_input.strip().upper()
 
 
-# --- Fetch Stock Data (Fixed Caching Structure) ---
+# --- Fetch Stock Data Safely (Caching Structured) ---
 @st.cache_data(ttl=3600)
 def load_stock_data(symbol):
   try:
@@ -53,10 +54,10 @@ def load_stock_data(symbol):
     return pd.DataFrame(), {}
 
 
-# Load data safely avoiding un-cacheable objects
+# Load data avoiding un-cacheable objects
 hist_df, stock_info = load_stock_data(stock_symbol)
 
-# Separate object creation for news/methods usage
+# Separate object creation for live news/methods usage
 stock_obj = yf.Ticker(stock_symbol)
 
 # --- Navigation Tabs ---
@@ -117,6 +118,10 @@ with tab1:
 with tab2:
   st.subheader("📊 Price Chart & Technical Indicators")
   if not hist_df.empty:
+    # Calculate Moving Averages for technical view
+    hist_df["SMA_20"] = hist_df["Close"].rolling(window=20).mean()
+    hist_df["SMA_50"] = hist_df["Close"].rolling(window=50).mean()
+
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
@@ -124,11 +129,30 @@ with tab2:
             y=hist_df["Close"],
             mode="lines",
             name="Close Price",
-            line=dict(color="blue", width=2),
+            line=dict(color="#00FFA3", width=2),
         )
     )
+    fig.add_trace(
+        go.Scatter(
+            x=hist_df.index,
+            y=hist_df["SMA_20"],
+            mode="lines",
+            name="SMA 20",
+            line=dict(color="#FF9900", width=1.5),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=hist_df.index,
+            y=hist_df["SMA_50"],
+            mode="lines",
+            name="SMA 50",
+            line=dict(color="#FF0055", width=1.5),
+        )
+    )
+
     fig.update_layout(
-        title=f"{stock_symbol} 6-Month Price Trend",
+        title=f"{stock_symbol} Price Trend with Technical Indicators",
         xaxis_title="Date",
         yaxis_title="Price (INR)",
         template="plotly_dark",
@@ -138,7 +162,7 @@ with tab2:
     st.warning("No historical chart data available.")
 
 # ==========================================
-# TAB 3: Company Fundamentals (FIXED N/A)
+# TAB 3: Company Fundamentals
 # ==========================================
 with tab3:
   st.subheader("🏛️ Key Fundamental Metrics")
