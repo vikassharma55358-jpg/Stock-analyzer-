@@ -48,24 +48,38 @@ POPULAR_STOCKS = {
 }
 
 # ----------------- SIDEBAR -----------------
-st.sidebar.header("🔍 Quick Stock Finder")
+st.sidebar.header("🔍 Stock Finder")
 
+# Popular stocks dropdown
 selected_company = st.sidebar.selectbox(
-    "Select a Popular Stock:",
-    options=["Custom Input"] + list(POPULAR_STOCKS.keys()),
+    "Select from Popular Stocks:",
+    options=["-- Select Stock --"] + list(POPULAR_STOCKS.keys()),
 )
 
-default_ticker = (
-    POPULAR_STOCKS[selected_company]
-    if selected_company != "Custom Input"
-    else "RELIANCE.NS"
-)
+# Text Input for ANY stock symbol
+st.sidebar.markdown("**OR Enter Any Ticker Symbol:**")
+manual_ticker = st.sidebar.text_input(
+    "Symbol (e.g., NHPC.NS, SBIN.NS, TSLA):",
+    value="",
+    placeholder="e.g. NHPC.NS",
+).strip().upper()
 
-ticker = (
-    st.sidebar.text_input("Or Enter Ticker Symbol Manually:", value=default_ticker)
-    .strip()
-    .upper()
+# Logic: Manual Input has priority, otherwise use Selectbox choice
+if manual_ticker:
+    ticker = manual_ticker
+elif selected_company != "-- Select Stock --":
+    ticker = POPULAR_STOCKS[selected_company]
+else:
+    ticker = "RELIANCE.NS" # Default fallback
+
+st.sidebar.caption("💡 **Tip:** Indian stocks ke aage `.NS` zaroor lagayein (e.g., `NHPC.NS`).")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📌 Common Stock Symbols")
+ref_df = pd.DataFrame(
+    list(POPULAR_STOCKS.items()), columns=["Company Name", "Symbol"]
 )
+st.sidebar.dataframe(ref_df, hide_index=True, use_container_width=True)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📌 Common Stock Symbols")
