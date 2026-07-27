@@ -82,6 +82,7 @@ if st.sidebar.button(f"➕ Add '{ticker}' to Watchlist"):
     if ticker not in st.session_state.watchlist:
         st.session_state.watchlist.append(ticker)
         st.sidebar.success(f"Added {ticker}!")
+        st.rerun()
     else:
         st.sidebar.info(f"{ticker} is already in Watchlist.")
 
@@ -623,7 +624,7 @@ if analyze_btn or ticker:
                         else f"**Profit Margin:** `{profit_margins}`"
                     )
 
-           # TAB 4: BROKERAGE TARGETS & NEWS REPORTS
+            # TAB 4: BROKERAGE TARGETS & NEWS REPORTS
             with tab4:
                 st.subheader("🎯 Brokerage Firm Targets & Recommendations")
 
@@ -689,7 +690,7 @@ if analyze_btn or ticker:
                 # 2. Fallback: Search Specific Brokerage Targets via News
                 if not has_yahoo_data:
                     st.info(
-                        f"⚡ Yahoo Direct API पर '{ticker}' का Breakdown नहीं"
+                        f"⚡ Yahoo Direct API par '{ticker}' ka Breakdown नहीं"
                         " मिला। News & Media से Brokerage Updates fetch किए जा"
                         " रहे हैं:"
                     )
