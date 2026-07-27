@@ -70,16 +70,9 @@ if manual_ticker:
 elif selected_company != "-- Select Stock --":
     ticker = POPULAR_STOCKS[selected_company]
 else:
-    ticker = "RELIANCE.NS" # Default fallback
+    ticker = "RELIANCE.NS"  # Default fallback
 
 st.sidebar.caption("💡 **Tip:** Indian stocks ke aage `.NS` zaroor lagayein (e.g., `NHPC.NS`).")
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("📌 Common Stock Symbols")
-ref_df = pd.DataFrame(
-    list(POPULAR_STOCKS.items()), columns=["Company Name", "Symbol"]
-)
-st.sidebar.dataframe(ref_df, hide_index=True, use_container_width=True)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📌 Common Stock Symbols")
@@ -134,7 +127,7 @@ def fetch_stock_data(symbol):
         delta = df["Close"].diff()
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
-        
+
         # Prevent division by zero
         rs = gain / loss.replace(0, 1e-10)
         df["RSI_14"] = 100 - (100 / (1 + rs))
@@ -216,7 +209,7 @@ def fetch_stock_news(search_term):
     return news_items
 
 
-# ----------------- AI GENERATORS -----------------
+# ----------------- AI GENERATORS WITH GOOGLE SEARCH GROUNDING -----------------
 def evaluate_custom_buy_price(
     ticker_sym, user_price, curr_price, target_mean, rsi, pe, key
 ):
@@ -232,35 +225,41 @@ def evaluate_custom_buy_price(
         - RSI (14 Days): {rsi}
         - P/E Ratio: {pe}
         
+        Use live search to see any latest breaking news or structural triggers for {ticker_sym}.
         Answer clearly in simple Hinglish (mix of Hindi + English):
         1. **Verdict**: Should the user buy at {user_price}? (GOOD ENTRY / RISKY / WAIT FOR DIP)
-        2. **Risk to Reward Ratio**: Evaluate if buying at {user_price} leaves enough profit upside compared to the Brokerage Target ({target_mean}).
+        2. **Risk to Reward Ratio**: Evaluate if buying at {user_price} leaves enough profit upside compared to the Target ({target_mean}).
         3. **Suggested Entry Zone & Stop Loss**: Give a clear suggested buying range and strict stop-loss price.
         Keep it direct and actionable with bullet points.
         """
         response = client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"tools": [{"google_search": {}}]}
         )
         return response.text
     except Exception as e:
         return f"AI Evaluation Error: {e}"
 
 
-def analyze_news_sentiment(news_list, key):
+def analyze_news_sentiment(news_list, ticker_sym, key):
     try:
         client = genai.Client(api_key=key)
         headlines = "\n".join([f"- {n['title']}" for n in news_list])
         prompt = f"""
-        Analyze these recent news headlines for a stock:
+        Analyze these recent news headlines for {ticker_sym}:
         {headlines}
         
+        Search for any additional real-time updates/breaking news about {ticker_sym} online.
         Provide a response in simple Hinglish:
         1. Overall News Sentiment: (BULLISH 🟢 / BEARISH 🔴 / NEUTRAL 🟡)
         2. Key Market Catalysts or Deals mentioned.
         3. Short-term price impact.
         """
         response = client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"tools": [{"google_search": {}}]}
         )
         return response.text
     except Exception as e:
@@ -280,13 +279,18 @@ def get_ai_analysis(
         - RSI: {rsi}
         - P/E: {pe}
         
+        Perform a live Google Search to fetch recent quarterly results, corporate actions, or major market developments for '{ticker_sym}'.
+        
         Provide a research report in Hinglish:
         1. Verdict (BUY / HOLD / SELL)
         2. Valuation check (P/E & RSI)
-        3. Target & Key Risks.
+        3. Live Catalysts / Market Factors (from real-time web search)
+        4. Target & Key Risks.
         """
         response = client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"tools": [{"google_search": {}}]}
         )
         return response.text
     except Exception as e:
@@ -438,7 +442,7 @@ if analyze_btn or ticker:
                     if eval_btn:
                         if GEMINI_API_KEY:
                             with st.spinner(
-                                "Analyzing risk/reward ratio for your price..."
+                                "Analyzing risk/reward ratio with live web search..."
                             ):
                                 eval_report = evaluate_custom_buy_price(
                                     ticker,
@@ -661,7 +665,6 @@ if analyze_btn or ticker:
                 st.markdown("---")
                 st.markdown("### 🏢 Recent Brokerage Firm Reports & News")
 
-                # 1. Try Yahoo Finance Data First
                 has_yahoo_data = False
                 try:
                     stock_obj = yf.Ticker(ticker)
@@ -703,12 +706,11 @@ if analyze_btn or ticker:
                 except Exception:
                     pass
 
-                # 2. Fallback: Search Specific Brokerage Targets via News
                 if not has_yahoo_data:
                     st.info(
-                        f"⚡ Yahoo Direct API par '{ticker}' ka Breakdown नहीं"
-                        " मिला। News & Media से Brokerage Updates fetch किए जा"
-                        " रहे हैं:"
+                        f"⚡ Yahoo Direct API par '{ticker}' ka Breakdown nahi"
+                        " mila. News & Media se Brokerage Updates fetch kiye ja"
+                        " rahe hain:"
                     )
 
                     brokerage_news = fetch_stock_news(
@@ -724,7 +726,7 @@ if analyze_btn or ticker:
                             st.markdown("---")
                     else:
                         st.warning(
-                            "कोई हालिया Brokerage Target Report नहीं मिली।"
+                            "Koi halia Brokerage Target Report nahi mili."
                         )
 
             # TAB 5: NEWS & SENTIMENT
@@ -743,9 +745,9 @@ if analyze_btn or ticker:
                         st.subheader("🧠 AI News Sentiment")
                         if GEMINI_API_KEY:
                             if st.button("Analyze News Sentiment ✨"):
-                                with st.spinner("Analyzing news..."):
+                                with st.spinner("Analyzing news & searching web..."):
                                     sentiment_report = analyze_news_sentiment(
-                                        news_data, GEMINI_API_KEY
+                                        news_data, clean_symbol, GEMINI_API_KEY
                                     )
                                     st.markdown(sentiment_report)
                         else:
@@ -760,16 +762,17 @@ if analyze_btn or ticker:
                 st.subheader("🤖 AI Agent Summary & Verdict")
                 if GEMINI_API_KEY:
                     if st.button("Generate Complete AI Verdict ✨"):
-                        report = get_ai_analysis(
-                            ticker,
-                            curr_price,
-                            target_mean,
-                            rec_key,
-                            latest_rsi,
-                            pe_str,
-                            GEMINI_API_KEY,
-                        )
-                        st.markdown(report)
+                        with st.spinner("Performing real-time market research..."):
+                            report = get_ai_analysis(
+                                ticker,
+                                curr_price,
+                                target_mean,
+                                rec_key,
+                                latest_rsi,
+                                pe_str,
+                                GEMINI_API_KEY,
+                            )
+                            st.markdown(report)
                 else:
                     st.error("`.env` file me GEMINI_API_KEY set nahi hai.")
 
@@ -808,7 +811,12 @@ if analyze_btn or ticker:
                                     else 0
                                 )
 
-                                sma_50_val = w_df["SMA_50"].iloc[-1] if "SMA_50" in w_df.columns and not pd.isna(w_df["SMA_50"].iloc[-1]) else w_curr
+                                sma_50_val = (
+                                    w_df["SMA_50"].iloc[-1]
+                                    if "SMA_50" in w_df.columns
+                                    and not pd.isna(w_df["SMA_50"].iloc[-1])
+                                    else w_curr
+                                )
 
                                 watchlist_data.append({
                                     "Symbol": item,
