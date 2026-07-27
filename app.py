@@ -116,11 +116,13 @@ def fetch_stock_data(symbol):
         df["SMA_50"] = df["Close"].rolling(window=50).mean()
         df["SMA_200"] = df["Close"].rolling(window=200).mean()
 
-        # RSI (14 Days)
+        # Safe RSI (14 Days)
         delta = df["Close"].diff()
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
-        rs = gain / loss
+        
+        # Prevent division by zero
+        rs = gain / loss.replace(0, 1e-10)
         df["RSI_14"] = 100 - (100 / (1 + rs))
 
         # Bollinger Bands
@@ -137,7 +139,7 @@ def fetch_stock_data(symbol):
         df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
 
         # 2. Key Metadata & Fundamentals
-        info = stock.info
+        info = stock.info or {}
 
         meta = {
             "regularMarketPrice": info.get(
@@ -152,7 +154,7 @@ def fetch_stock_data(symbol):
                     else float(df["Close"].iloc[-1])
                 ),
             ),
-            "currency": info.get("currency", "INR"),
+            "currency": info.get("currency", "INR" if symbol.endswith(".NS") else "USD"),
         }
 
         return df, meta, info
@@ -407,7 +409,7 @@ if analyze_btn or ticker:
                             " Entry)."
                         )
 
-                    if isinstance(target_mean, (int, float)):
+                    if isinstance(target_mean, (int, float)) and user_buy_price > 0:
                         potential_gain = (
                             (target_mean - user_buy_price) / user_buy_price
                         ) * 100
@@ -792,6 +794,8 @@ if analyze_btn or ticker:
                                     else 0
                                 )
 
+                                sma_50_val = w_df["SMA_50"].iloc[-1] if "SMA_50" in w_df.columns and not pd.isna(w_df["SMA_50"].iloc[-1]) else w_curr
+
                                 watchlist_data.append({
                                     "Symbol": item,
                                     "Price": (
@@ -802,7 +806,7 @@ if analyze_btn or ticker:
                                     "Change (%)": f"{w_pct:+.2f}%",
                                     "50-SMA Status": (
                                         "Bullish 🟢"
-                                        if w_curr > w_df["SMA_50"].iloc[-1]
+                                        if w_curr > sma_50_val
                                         else "Bearish 🔴"
                                     ),
                                 })
