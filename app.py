@@ -776,78 +776,56 @@ if analyze_btn or ticker:
                 else:
                     st.error("`.env` file me GEMINI_API_KEY set nahi hai.")
 
-            # TAB 7: WATCHLIST TRACKER
+            # TAB 7: WATCHLIST TRACKER (FIXED & COMPLETED)
             with tab7:
                 st.subheader("⭐ Your Personal Watchlist Tracker")
                 st.caption(
-                    "Real-time tracking for your favorite stocks in this"
-                    " session."
+                    "Real-time tracking for your favorite stocks in this session."
                 )
 
                 if not st.session_state.watchlist:
                     st.info(
-                        "Aapki watchlist khali hai. Sidebar se stocks add"
-                        " karein!"
+                        "Aapki watchlist khali hai. Sidebar se stocks add karein!"
                     )
                 else:
                     watchlist_data = []
                     with st.spinner("Updating Watchlist Prices..."):
-                        for item in st.session_state.watchlist:
-                            w_df, w_meta, _ = fetch_stock_data(item)
-                            if w_df is not None and not w_df.empty:
-                                w_curr = float(
-                                    w_meta.get(
-                                        "regularMarketPrice",
-                                        w_df["Close"].iloc[-1],
-                                    )
+                        for w_sym in st.session_state.watchlist:
+                            try:
+                                w_stock = yf.Ticker(w_sym)
+                                w_info = w_stock.info or {}
+                                w_price = w_info.get(
+                                    "currentPrice",
+                                    w_info.get("regularMarketPrice", 0.0),
                                 )
-                                w_prev = float(
-                                    w_meta.get("chartPreviousClose", w_curr)
-                                )
-                                w_change = w_curr - w_prev
+                                w_prev = w_info.get("previousClose", w_price)
+                                w_change = w_price - w_prev
                                 w_pct = (
                                     (w_change / w_prev * 100)
-                                    if w_prev != 0
-                                    else 0
+                                    if w_prev and w_prev != 0
+                                    else 0.0
                                 )
-
-                                sma_50_val = (
-                                    w_df["SMA_50"].iloc[-1]
-                                    if "SMA_50" in w_df.columns
-                                    and not pd.isna(w_df["SMA_50"].iloc[-1])
-                                    else w_curr
-                                )
+                                w_curr = w_info.get("currency", "INR")
 
                                 watchlist_data.append({
-                                    "Symbol": item,
-                                    "Price": (
-                                        f"{w_meta.get('currency', 'INR')}"
-                                        f" {w_curr:.2f}"
-                                    ),
-                                    "Day Change": f"{w_change:+.2f}",
-                                    "Change (%)": f"{w_pct:+.2f}%",
-                                    "50-SMA Status": (
-                                        "Bullish 🟢"
-                                        if w_curr > sma_50_val
-                                        else "Bearish 🔴"
+                                    "Ticker": w_sym,
+                                    "Price": f"{w_curr} {w_price:.2f}",
+                                    "Change": f"{w_change:+.2f}",
+                                    "Change %": f"{w_pct:+.2f}%",
+                                    "Market Cap": format_market_cap(
+                                        w_info.get("marketCap", "N/A"), w_sym
                                     ),
                                 })
+                            except Exception:
+                                watchlist_data.append({
+                                    "Ticker": w_sym,
+                                    "Price": "N/A",
+                                    "Change": "N/A",
+                                    "Change %": "N/A",
+                                    "Market Cap": "N/A",
+                                })
 
-                    if watchlist_data:
-                        w_df_display = pd.DataFrame(watchlist_data)
-                        st.dataframe(
-                            w_df_display,
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-
-                        st.markdown("---")
-                        st.markdown("### 📊 Watchlist Live Summary Cards")
-                        cols = st.columns(min(len(watchlist_data), 4))
-                        for idx, stock in enumerate(watchlist_data[:4]):
-                            with cols[idx]:
-                                st.metric(
-                                    label=stock["Symbol"],
-                                    value=stock["Price"],
-                                    delta=f"{stock['Change (%)']}",
-                                )
+                    w_df = pd.DataFrame(watchlist_data)
+                    st.dataframe(
+                        w_df, use_container_width=True, hide_index=True
+                    )
