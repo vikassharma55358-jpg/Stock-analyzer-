@@ -111,6 +111,42 @@ def get_auto_peers(symbol, sector, industry):
     return [p for p in DEFAULT_PEERS if p != symbol][:3]
 
 
+def get_price_range_peers(symbol, current_price, currency, max_results=4, tolerance=0.25):
+    """Find peer stocks whose CURRENT PRICE is close to this stock's price
+    (same currency market only, so INR stocks compare with INR and USD with USD)."""
+    if not isinstance(current_price, (int, float)) or current_price <= 0:
+        return [p for p in DEFAULT_PEERS if p != symbol][:max_results]
+
+    # Build a candidate pool from everything we already know about
+    candidate_pool = set()
+    for peers in SECTOR_PEERS.values():
+        candidate_pool.update(peers)
+    candidate_pool.update(POPULAR_STOCKS.values())
+    candidate_pool.discard(symbol)
+
+    scored = []
+    for cand in candidate_pool:
+        data = fetch_comparison_data(cand)
+        price = data.get("Price")
+        cand_currency = data.get(
+            "Currency", "INR" if cand.endswith(".NS") else "USD"
+        )
+        if cand_currency != currency:
+            continue
+        if isinstance(price, (int, float)) and price > 0:
+            diff_pct = abs(price - current_price) / current_price
+            scored.append((diff_pct, cand))
+
+    scored.sort(key=lambda x: x[0])
+
+    # Prefer close matches within the tolerance band; if not enough, take closest anyway
+    close_matches = [c for d, c in scored if d <= tolerance][:max_results]
+    if len(close_matches) < 2:
+        close_matches = [c for _, c in scored[:max_results]]
+
+    return close_matches if close_matches else [p for p in DEFAULT_PEERS if p != symbol][:max_results]
+
+
 # ----------------- NAME -> TICKER SEARCH -----------------
 @st.cache_data(ttl=3600)
 def search_stock_by_name(query):
@@ -520,6 +556,7 @@ def fetch_comparison_data(symbol):
         target = info.get("targetMeanPrice", "N/A")
         rec = str(info.get("recommendationKey", "N/A")).upper()
         mcap = info.get("marketCap", "N/A")
+        currency = info.get("currency", "INR" if symbol.endswith(".NS") else "USD")
 
         return {
             "Ticker": symbol,
@@ -529,6 +566,7 @@ def fetch_comparison_data(symbol):
             "Target Price": round(target, 2) if isinstance(target, (int, float)) else "N/A",
             "Recommendation": rec,
             "Market Cap": format_market_cap(mcap, symbol),
+            "Currency": currency,
         }
     except Exception:
         return {
@@ -539,6 +577,7 @@ def fetch_comparison_data(symbol):
             "Target Price": "N/A",
             "Recommendation": "N/A",
             "Market Cap": "N/A",
+            "Currency": "N/A",
         }
 
 
@@ -1234,14 +1273,11 @@ if analyze_btn or ticker:
                     " suggestion lo ki kaunsa best buy hai."
                 )
 
-                auto_peers = get_auto_peers(
-                    ticker, info.get("sector"), info.get("industry")
-                )
-                sector_label = info.get("sector", "N/A")
+                auto_peers = get_price_range_peers(ticker, curr_price, currency)
                 st.caption(
-                    f"🏷️ Detected sector: **{sector_label}** — neeche peer stocks"
-                    " apne aap suggest kar diye gaye hain, aap chaho toh edit"
-                    " kar sakte ho."
+                    f"🏷️ Price range match: **{currency} {curr_price:.2f}** ke aas-paas"
+                    " ke stocks apne aap suggest kar diye gaye hain (same currency"
+                    " market se), aap chaho toh edit kar sakte ho."
                 )
 
                 compare_input = st.text_input(
