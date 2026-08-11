@@ -472,6 +472,78 @@ def get_ipo_suggestions(key, risk_profile="Moderate"):
         return f"AI IPO Suggestion Error: {e}"
 
 
+@st.cache_data(ttl=300)
+def fetch_comparison_data(symbol):
+    """Fetch a compact set of metrics for the stock comparison table."""
+    try:
+        stock = yf.Ticker(symbol)
+        info = stock.info or {}
+        price = info.get("currentPrice", info.get("regularMarketPrice", "N/A"))
+        pe = info.get("trailingPE", info.get("forwardPE", "N/A"))
+        pb = info.get("priceToBook", "N/A")
+        target = info.get("targetMeanPrice", "N/A")
+        rec = str(info.get("recommendationKey", "N/A")).upper()
+        mcap = info.get("marketCap", "N/A")
+
+        return {
+            "Ticker": symbol,
+            "Price": round(price, 2) if isinstance(price, (int, float)) else "N/A",
+            "P/E": round(pe, 2) if isinstance(pe, (int, float)) else "N/A",
+            "P/B": round(pb, 2) if isinstance(pb, (int, float)) else "N/A",
+            "Target Price": round(target, 2) if isinstance(target, (int, float)) else "N/A",
+            "Recommendation": rec,
+            "Market Cap": format_market_cap(mcap, symbol),
+        }
+    except Exception:
+        return {
+            "Ticker": symbol,
+            "Price": "N/A",
+            "P/E": "N/A",
+            "P/B": "N/A",
+            "Target Price": "N/A",
+            "Recommendation": "N/A",
+            "Market Cap": "N/A",
+        }
+
+
+def get_comparison_suggestion(primary_ticker, comparison_rows, key):
+    try:
+        client = genai.Client(api_key=key)
+        rows_text = "\n".join(
+            f"- {r['Ticker']}: Price={r['Price']}, P/E={r['P/E']}, P/B={r['P/B']}, "
+            f"Target Price={r['Target Price']}, Recommendation={r['Recommendation']}, "
+            f"Market Cap={r['Market Cap']}"
+            for r in comparison_rows
+        )
+        prompt = f"""
+        The user is planning to buy the stock '{primary_ticker}' and wants to compare it
+        against a few alternative stocks before deciding where to put their money.
+
+        Comparison data:
+        {rows_text}
+
+        Use live Google Search to check recent news, results, or developments for these
+        stocks that could affect the decision.
+
+        Answer in simple Hinglish (Hindi + English mix):
+        1. **Best Pick**: Among all the stocks listed (including '{primary_ticker}'), which
+           one looks like the best buy right now, and why.
+        2. **Why not the others**: One short line each on why the other stocks are
+           relatively weaker choices right now.
+        3. **Final Verdict on '{primary_ticker}'**: Should the user go ahead and buy
+           '{primary_ticker}' specifically, or is there a clearly better alternative here?
+        Keep it concise, use bullet points, be direct.
+        """
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"tools": [{"google_search": {}}]}
+        )
+        return response.text
+    except Exception as e:
+        return f"AI Comparison Error: {e}"
+
+
 def format_market_cap(val, symbol):
     if val == "N/A" or not isinstance(val, (int, float)):
         return "N/A"
@@ -550,7 +622,7 @@ if analyze_btn or ticker:
 
             st.markdown("---")
 
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
                 "💡 Buy/Sell Evaluator",
                 "📊 Price & Technicals",
                 "🏛️ Company Fundamentals",
@@ -559,6 +631,7 @@ if analyze_btn or ticker:
                 "🤖 AI Financial Verdict",
                 "⭐ My Watchlist",
                 "🆕 IPO Suggestions",
+                "🆚 Compare & Suggest",
             ])
 
             # TAB 1: BUY/SELL EVALUATOR
@@ -1116,3 +1189,62 @@ if analyze_btn or ticker:
                     "⚠️ Yeh AI-generated research hai, financial advice nahi."
                     " IPO investing me listing loss ka risk bhi hota hai."
                 )
+
+            # TAB 9: COMPARE & SUGGEST (Buy this stock or a better alternative?)
+            with tab9:
+                st.subheader("🆚 Compare & Suggest — Ye Stock Kharidna Chahiye?")
+                st.caption(
+                    f"'{ticker}' ko doosre similar stocks se compare karo, aur AI se"
+                    " suggestion lo ki kaunsa best buy hai."
+                )
+
+                compare_input = st.text_input(
+                    "Compare with (comma-separated tickers, e.g. TCS.NS, WIPRO.NS, HCLTECH.NS):",
+                    value="",
+                    key="compare_tickers_input",
+                    placeholder="e.g. TCS.NS, WIPRO.NS, HCLTECH.NS",
+                )
+
+                if compare_input.strip():
+                    compare_tickers = [
+                        t.strip().upper()
+                        for t in compare_input.split(",")
+                        if t.strip()
+                    ]
+                    all_compare_tickers = [ticker] + [
+                        t for t in compare_tickers if t != ticker
+                    ]
+
+                    with st.spinner("Fetching comparison data..."):
+                        comparison_rows = [
+                            fetch_comparison_data(t) for t in all_compare_tickers
+                        ]
+
+                    comp_df = pd.DataFrame(comparison_rows)
+                    st.dataframe(
+                        comp_df, use_container_width=True, hide_index=True
+                    )
+
+                    if GEMINI_API_KEY:
+                        if st.button(
+                            "Get AI Buy Suggestion 🚀", key="compare_ai_btn"
+                        ):
+                            with st.spinner(
+                                "Comparing stocks & searching live news..."
+                            ):
+                                suggestion = get_comparison_suggestion(
+                                    ticker, comparison_rows, GEMINI_API_KEY
+                                )
+                                st.markdown("### 🤖 AI Suggestion")
+                                st.markdown(suggestion)
+                    else:
+                        st.error(
+                            "`.env` file me GEMINI_API_KEY set nahi hai."
+                        )
+                else:
+                    st.info(
+                        f"👆 Upar box me un stocks ke tickers daalo jinse aap"
+                        f" '{ticker}' ko compare karna chahte ho (comma se"
+                        " separate karke). Jaise agar RELIANCE lene ka soch rahe"
+                        " ho, toh 'ONGC.NS, IOC.NS' daal ke compare karo."
+                    )
