@@ -1225,6 +1225,67 @@ if analyze_btn or ticker:
                         comp_df, use_container_width=True, hide_index=True
                     )
 
+                    # --- CHART 1: Normalized Price Performance (last 1 year) ---
+                    st.markdown("### 📈 Price Performance Comparison (Last 1 Year)")
+                    st.caption(
+                        "Sab stocks ko 100 se start karke normalize kiya gaya hai,"
+                        " taaki alag-alag price range ke stocks bhi fairly compare"
+                        " ho sakein — jo line sabse upar hai usne sabse zyada"
+                        " grow kiya hai."
+                    )
+                    perf_fig = go.Figure()
+                    for t in all_compare_tickers:
+                        hist_df, _, _ = fetch_stock_data(t)
+                        if hist_df is not None and not hist_df.empty:
+                            normalized = (
+                                hist_df["Close"] / hist_df["Close"].iloc[0]
+                            ) * 100
+                            perf_fig.add_trace(
+                                go.Scatter(
+                                    x=hist_df["Date"],
+                                    y=normalized,
+                                    mode="lines",
+                                    name=t,
+                                    line=dict(width=2),
+                                )
+                            )
+                    perf_fig.update_layout(
+                        template="plotly_dark",
+                        height=400,
+                        yaxis_title="Normalized Price (Base = 100)",
+                        xaxis_title="Date",
+                        legend_title="Ticker",
+                    )
+                    st.plotly_chart(perf_fig, use_container_width=True)
+
+                    # --- CHART 2: P/E & P/B Bar Comparison ---
+                    st.markdown("### 📊 Valuation Metrics Comparison (P/E vs P/B)")
+                    tickers_list = [r["Ticker"] for r in comparison_rows]
+                    pe_values = [
+                        r["P/E"] if isinstance(r["P/E"], (int, float)) else 0
+                        for r in comparison_rows
+                    ]
+                    pb_values = [
+                        r["P/B"] if isinstance(r["P/B"], (int, float)) else 0
+                        for r in comparison_rows
+                    ]
+                    metric_fig = go.Figure()
+                    metric_fig.add_trace(
+                        go.Bar(x=tickers_list, y=pe_values, name="P/E Ratio")
+                    )
+                    metric_fig.add_trace(
+                        go.Bar(x=tickers_list, y=pb_values, name="P/B Ratio")
+                    )
+                    metric_fig.update_layout(
+                        barmode="group",
+                        template="plotly_dark",
+                        height=400,
+                        yaxis_title="Ratio Value",
+                    )
+                    st.plotly_chart(metric_fig, use_container_width=True)
+
+                    st.markdown("---")
+
                     if GEMINI_API_KEY:
                         if st.button(
                             "Get AI Buy Suggestion 🚀", key="compare_ai_btn"
