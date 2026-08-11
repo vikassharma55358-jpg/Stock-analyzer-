@@ -307,6 +307,46 @@ def fetch_stock_news(search_term):
     return news_items
 
 
+@st.cache_data(ttl=900)
+def fetch_ipo_news():
+    """Fetch recent IPO-related news headlines (mainboard + SME, India-focused)."""
+    url = "https://news.google.com/rss/search?q=upcoming+IPO+stock+market+india&hl=en-IN&gl=IN&ceid=IN:en"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        )
+    }
+    news_items = []
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            root = ET.fromstring(resp.content)
+            for item in root.findall(".//item")[:10]:
+                title = (
+                    item.find("title").text
+                    if item.find("title") is not None
+                    else ""
+                )
+                link = (
+                    item.find("link").text
+                    if item.find("link") is not None
+                    else ""
+                )
+                pub_date = (
+                    item.find("pubDate").text
+                    if item.find("pubDate") is not None
+                    else ""
+                )
+                news_items.append(
+                    {"title": title, "link": link, "date": pub_date}
+                )
+    except Exception:
+        pass
+
+    return news_items
+
+
 # ----------------- AI GENERATORS WITH GOOGLE SEARCH GROUNDING -----------------
 def evaluate_custom_buy_price(
     ticker_sym, user_price, curr_price, target_mean, rsi, pe, key
@@ -395,6 +435,43 @@ def get_ai_analysis(
         return f"AI Generation Error: {e}"
 
 
+def get_ipo_suggestions(key, risk_profile="Moderate"):
+    try:
+        client = genai.Client(api_key=key)
+        prompt = f"""
+        Act as an IPO Research Analyst covering the Indian stock market (NSE/BSE mainboard
+        and SME IPOs), and also major global IPOs if relevant.
+
+        Use live Google Search to find:
+        1. IPOs that are CURRENTLY OPEN for subscription today.
+        2. IPOs opening in the next 1-2 weeks (upcoming).
+        3. Their price band, lot size, subscription status (if open), and Grey Market
+           Premium (GMP) if available.
+
+        User's risk profile: {risk_profile}
+
+        Respond in simple Hinglish (Hindi + English mix), structured like this:
+        1. **Currently Open IPOs**: list each with price band, subscription status, GMP, and
+           a short verdict (SUBSCRIBE / AVOID / RISKY) based on fundamentals and market buzz.
+        2. **Upcoming IPOs (next 1-2 weeks)**: list each with expected price band and what
+           the company does.
+        3. **Top Pick(s)**: based on the user's risk profile, highlight 1-2 IPOs that look
+           most promising and briefly explain why.
+        4. Add a short disclaimer that this is AI-generated research, not financial advice,
+           and IPO investing carries risk including listing losses.
+
+        Keep it concise and use bullet points.
+        """
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"tools": [{"google_search": {}}]}
+        )
+        return response.text
+    except Exception as e:
+        return f"AI IPO Suggestion Error: {e}"
+
+
 def format_market_cap(val, symbol):
     if val == "N/A" or not isinstance(val, (int, float)):
         return "N/A"
@@ -473,7 +550,7 @@ if analyze_btn or ticker:
 
             st.markdown("---")
 
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
                 "💡 Buy/Sell Evaluator",
                 "📊 Price & Technicals",
                 "🏛️ Company Fundamentals",
@@ -481,6 +558,7 @@ if analyze_btn or ticker:
                 "📰 News & Sentiment",
                 "🤖 AI Financial Verdict",
                 "⭐ My Watchlist",
+                "🆕 IPO Suggestions",
             ])
 
             # TAB 1: BUY/SELL EVALUATOR
@@ -987,3 +1065,54 @@ if analyze_btn or ticker:
                     m2.metric("Current Value", f"{total_current_value:,.2f}")
                     m3.metric("Total P/L", f"{total_pnl:,.2f}")
                     m4.metric("Total P/L %", f"{total_pnl_pct:+.2f}%")
+
+            # TAB 8: IPO SUGGESTIONS
+            with tab8:
+                st.subheader("🆕 IPO Suggestions & Analysis")
+                st.caption(
+                    "Current open aur upcoming IPOs ke baare me AI se live-searched"
+                    " suggestions lo, saath hi recent IPO news bhi dekho."
+                )
+
+                col_news, col_ai = st.columns([0.45, 0.55])
+
+                with col_news:
+                    st.markdown("### 📰 Recent IPO News")
+                    ipo_news = fetch_ipo_news()
+                    if ipo_news:
+                        for item in ipo_news:
+                            st.markdown(
+                                f"**[{item['title']}]({item['link']})**"
+                            )
+                            st.caption(f"📅 {item['date']}")
+                            st.markdown("---")
+                    else:
+                        st.info("Abhi IPO news load nahi ho payi.")
+
+                with col_ai:
+                    st.markdown("### 🤖 AI IPO Suggestions")
+                    risk_profile = st.selectbox(
+                        "Your Risk Profile:",
+                        options=["Conservative", "Moderate", "Aggressive"],
+                        index=1,
+                        key="ipo_risk_profile",
+                    )
+                    if GEMINI_API_KEY:
+                        if st.button("Get AI IPO Suggestions ✨"):
+                            with st.spinner(
+                                "Searching live for open & upcoming IPOs..."
+                            ):
+                                ipo_report = get_ipo_suggestions(
+                                    GEMINI_API_KEY, risk_profile
+                                )
+                                st.markdown(ipo_report)
+                    else:
+                        st.error(
+                            "`.env` file me GEMINI_API_KEY set nahi hai."
+                        )
+
+                st.markdown("---")
+                st.caption(
+                    "⚠️ Yeh AI-generated research hai, financial advice nahi."
+                    " IPO investing me listing loss ka risk bhi hota hai."
+                )
