@@ -1,3 +1,4 @@
+import json
 import os
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
@@ -17,14 +18,40 @@ st.set_page_config(
     page_title="AI Stock & Fundamental Analyzer", layout="wide", page_icon="📈"
 )
 
-# Initialize Watchlist in Session State
+# ----------------- PORTFOLIO PERSISTENCE (saved to a JSON file on disk) -----------------
+PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portfolio_data.json")
+
+
+def load_portfolio():
+    """Load saved portfolio (ticker -> {quantity, buy_price}) from disk, or return defaults."""
+    try:
+        if os.path.exists(PORTFOLIO_FILE):
+            with open(PORTFOLIO_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    # Default starter list — quantity/buy_price are 0 until user fills them in
+    return {
+        "RELIANCE.NS": {"quantity": 0.0, "buy_price": 0.0},
+        "TATAMOTORS.NS": {"quantity": 0.0, "buy_price": 0.0},
+        "SJVN.NS": {"quantity": 0.0, "buy_price": 0.0},
+        "AAPL": {"quantity": 0.0, "buy_price": 0.0},
+    }
+
+
+def save_portfolio(data):
+    """Persist the portfolio dict to disk so it survives app restarts."""
+    try:
+        with open(PORTFOLIO_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+
+
+# Initialize Portfolio/Watchlist in Session State
+# Structure: { "TICKER": {"quantity": float, "buy_price": float}, ... }
 if "watchlist" not in st.session_state:
-    st.session_state.watchlist = [
-        "RELIANCE.NS",
-        "TATAMOTORS.NS",
-        "SJVN.NS",
-        "AAPL",
-    ]
+    st.session_state.watchlist = load_portfolio()
 
 st.title("📈 AI Stock, News & Smart Entry Evaluator")
 
@@ -142,27 +169,37 @@ ref_df = pd.DataFrame(
 )
 st.sidebar.dataframe(ref_df, hide_index=True, use_container_width=True)
 
-# --- WATCHLIST MANAGER ---
+# --- PORTFOLIO / WATCHLIST MANAGER ---
 st.sidebar.markdown("---")
-st.sidebar.subheader("⭐ Watchlist Manager")
+st.sidebar.subheader("⭐ Portfolio Manager")
+st.sidebar.caption("Quantity & buy price daalo taaki P&L track ho sake (0 chhod sakte ho sirf watch karne ke liye).")
 
-if st.sidebar.button(f"➕ Add '{ticker}' to Watchlist"):
-    if ticker not in st.session_state.watchlist:
-        st.session_state.watchlist.append(ticker)
-        st.sidebar.success(f"Added {ticker}!")
-        st.rerun()
-    else:
-        st.sidebar.info(f"{ticker} is already in Watchlist.")
+add_qty = st.sidebar.number_input(
+    "Quantity", min_value=0.0, value=1.0, step=1.0, key="add_qty_input"
+)
+add_buy_price = st.sidebar.number_input(
+    f"Your Buy Price ({ticker}):", min_value=0.0, value=0.0, step=1.0, key="add_buy_price_input"
+)
+
+if st.sidebar.button(f"➕ Add '{ticker}' to Portfolio"):
+    st.session_state.watchlist[ticker] = {
+        "quantity": add_qty,
+        "buy_price": add_buy_price,
+    }
+    save_portfolio(st.session_state.watchlist)
+    st.sidebar.success(f"Added {ticker} ({add_qty} qty @ {add_buy_price})!")
+    st.rerun()
 
 if st.session_state.watchlist:
     selected_to_remove = st.sidebar.selectbox(
         "Remove Stock:",
-        options=["Select Stock"] + st.session_state.watchlist,
+        options=["Select Stock"] + list(st.session_state.watchlist.keys()),
         key="remove_stock_select",
     )
     if selected_to_remove != "Select Stock":
         if st.sidebar.button(f"❌ Remove {selected_to_remove}"):
-            st.session_state.watchlist.remove(selected_to_remove)
+            del st.session_state.watchlist[selected_to_remove]
+            save_portfolio(st.session_state.watchlist)
             st.sidebar.success(f"Removed {selected_to_remove}")
             st.rerun()
 
@@ -837,11 +874,12 @@ if analyze_btn or ticker:
                 else:
                     st.error("`.env` file me GEMINI_API_KEY set nahi hai.")
 
-            # TAB 7: WATCHLIST TRACKER (FIXED & COMPLETED)
+            # TAB 7: PORTFOLIO TRACKER (Quantity, Buy Price, Live P/L)
             with tab7:
-                st.subheader("⭐ Your Personal Watchlist Tracker")
+                st.subheader("⭐ My Watchlist & Portfolio Tracker")
                 st.caption(
-                    "Real-time tracking for your favorite stocks in this session."
+                    "Table me hi Quantity aur Buy Price edit kar sakte ho — P/L"
+                    " automatically calculate ho jayega aur save bhi ho jayega."
                 )
 
                 if not st.session_state.watchlist:
@@ -849,44 +887,103 @@ if analyze_btn or ticker:
                         "Aapki watchlist khali hai. Sidebar se stocks add karein!"
                     )
                 else:
-                    watchlist_data = []
-                    with st.spinner("Updating Watchlist Prices..."):
-                        for w_sym in st.session_state.watchlist:
+                    portfolio_rows = []
+                    with st.spinner("Updating Portfolio Prices..."):
+                        for w_sym, w_data in st.session_state.watchlist.items():
+                            qty = float(w_data.get("quantity", 0.0))
+                            buy_price = float(w_data.get("buy_price", 0.0))
                             try:
                                 w_stock = yf.Ticker(w_sym)
                                 w_info = w_stock.info or {}
-                                w_price = w_info.get(
-                                    "currentPrice",
-                                    w_info.get("regularMarketPrice", 0.0),
-                                )
-                                w_prev = w_info.get("previousClose", w_price)
-                                w_change = w_price - w_prev
-                                w_pct = (
-                                    (w_change / w_prev * 100)
-                                    if w_prev and w_prev != 0
-                                    else 0.0
+                                w_price = float(
+                                    w_info.get(
+                                        "currentPrice",
+                                        w_info.get("regularMarketPrice", 0.0),
+                                    )
                                 )
                                 w_curr = w_info.get("currency", "INR")
-
-                                watchlist_data.append({
-                                    "Ticker": w_sym,
-                                    "Price": f"{w_curr} {w_price:.2f}",
-                                    "Change": f"{w_change:+.2f}",
-                                    "Change %": f"{w_pct:+.2f}%",
-                                    "Market Cap": format_market_cap(
-                                        w_info.get("marketCap", "N/A"), w_sym
-                                    ),
-                                })
                             except Exception:
-                                watchlist_data.append({
-                                    "Ticker": w_sym,
-                                    "Price": "N/A",
-                                    "Change": "N/A",
-                                    "Change %": "N/A",
-                                    "Market Cap": "N/A",
-                                })
+                                w_price = 0.0
+                                w_curr = "INR"
 
-                    w_df = pd.DataFrame(watchlist_data)
-                    st.dataframe(
-                        w_df, use_container_width=True, hide_index=True
+                            investment = qty * buy_price
+                            current_value = qty * w_price
+                            pnl = current_value - investment
+                            pnl_pct = (
+                                (pnl / investment * 100) if investment > 0 else 0.0
+                            )
+
+                            portfolio_rows.append({
+                                "Ticker": w_sym,
+                                "Quantity": qty,
+                                "Buy Price": buy_price,
+                                "Current Price": round(w_price, 2),
+                                "Currency": w_curr,
+                                "Investment": round(investment, 2),
+                                "Current Value": round(current_value, 2),
+                                "P/L": round(pnl, 2),
+                                "P/L %": round(pnl_pct, 2),
+                            })
+
+                    port_df = pd.DataFrame(portfolio_rows)
+
+                    edited_df = st.data_editor(
+                        port_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        disabled=[
+                            "Ticker",
+                            "Current Price",
+                            "Currency",
+                            "Investment",
+                            "Current Value",
+                            "P/L",
+                            "P/L %",
+                        ],
+                        column_config={
+                            "Quantity": st.column_config.NumberColumn(
+                                "Quantity", min_value=0.0, step=1.0
+                            ),
+                            "Buy Price": st.column_config.NumberColumn(
+                                "Buy Price", min_value=0.0, step=1.0
+                            ),
+                        },
+                        key="portfolio_editor",
                     )
+
+                    # Agar user ne table me quantity/buy price edit kiya hai, use save karo
+                    changed = False
+                    for _, row in edited_df.iterrows():
+                        sym = row["Ticker"]
+                        new_qty = float(row["Quantity"])
+                        new_buy_price = float(row["Buy Price"])
+                        old = st.session_state.watchlist.get(sym, {})
+                        if (
+                            old.get("quantity") != new_qty
+                            or old.get("buy_price") != new_buy_price
+                        ):
+                            st.session_state.watchlist[sym] = {
+                                "quantity": new_qty,
+                                "buy_price": new_buy_price,
+                            }
+                            changed = True
+
+                    if changed:
+                        save_portfolio(st.session_state.watchlist)
+                        st.rerun()
+
+                    st.markdown("---")
+                    total_investment = port_df["Investment"].sum()
+                    total_current_value = port_df["Current Value"].sum()
+                    total_pnl = total_current_value - total_investment
+                    total_pnl_pct = (
+                        (total_pnl / total_investment * 100)
+                        if total_investment > 0
+                        else 0.0
+                    )
+
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Total Investment", f"{total_investment:,.2f}")
+                    m2.metric("Current Value", f"{total_current_value:,.2f}")
+                    m3.metric("Total P/L", f"{total_pnl:,.2f}")
+                    m4.metric("Total P/L %", f"{total_pnl_pct:+.2f}%")
