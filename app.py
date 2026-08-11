@@ -18,6 +18,71 @@ st.set_page_config(
     page_title="AI Stock & Fundamental Analyzer", layout="wide", page_icon="📈"
 )
 
+# ----------------- CUSTOM THEME: DARK TRADING-DESK LOOK -----------------
+st.markdown(
+    """
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+    :root {
+        --td-bg: #0B1220;
+        --td-card: #141B2E;
+        --td-border: #232C42;
+        --td-text: #F4F1EA;
+        --td-muted: #8A93A6;
+        --td-amber: #EF9F27;
+        --td-teal: #5DCAA5;
+        --td-coral: #F0997B;
+    }
+    .stApp { background-color: var(--td-bg); }
+    h1, h2, h3 { font-family: 'Space Grotesk', sans-serif !important; color: var(--td-text) !important; }
+    [data-testid="stMetricValue"], [data-testid="stMetricDelta"] {
+        font-family: 'IBM Plex Mono', monospace !important;
+    }
+    [data-testid="stMetric"] {
+        background: var(--td-card);
+        border-left: 3px solid var(--td-amber);
+        border-radius: 0 8px 8px 0;
+        padding: 12px 14px;
+    }
+    [data-testid="stSidebar"] { background-color: var(--td-card); }
+    [data-testid="stTabs"] button[aria-selected="true"] {
+        color: var(--td-amber) !important;
+        border-bottom-color: var(--td-amber) !important;
+    }
+    div[data-baseweb="tab-list"] { border-bottom: 1px solid var(--td-border); }
+    .stButton button {
+        font-family: 'Space Grotesk', sans-serif;
+        border-radius: 6px;
+    }
+    /* Scrolling ticker tape */
+    .ticker-wrap {
+        overflow: hidden;
+        white-space: nowrap;
+        background: var(--td-card);
+        border-left: 3px solid var(--td-amber);
+        border-radius: 6px;
+        padding: 8px 0;
+        margin-bottom: 18px;
+    }
+    .ticker-move {
+        display: inline-block;
+        padding-left: 100%;
+        animation: ticker-scroll 25s linear infinite;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+    }
+    .ticker-move span { padding: 0 22px; }
+    .tick-up { color: var(--td-teal); }
+    .tick-down { color: var(--td-coral); }
+    @keyframes ticker-scroll {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(-100%); }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ----------------- PORTFOLIO PERSISTENCE (saved to a JSON file on disk) -----------------
 PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portfolio_data.json")
 
@@ -54,6 +119,43 @@ if "watchlist" not in st.session_state:
     st.session_state.watchlist = load_portfolio()
 
 st.title("📈 AI Stock, News & Smart Entry Evaluator")
+
+
+# ----------------- LIVE SCROLLING TICKER TAPE -----------------
+@st.cache_data(ttl=120)
+def get_ticker_tape_data(symbols):
+    rows = []
+    for sym in symbols:
+        try:
+            t_info = yf.Ticker(sym).info or {}
+            price = t_info.get("currentPrice", t_info.get("regularMarketPrice"))
+            prev = t_info.get("previousClose", price)
+            if isinstance(price, (int, float)) and isinstance(prev, (int, float)) and prev != 0:
+                pct = (price - prev) / prev * 100
+            else:
+                pct = 0.0
+            rows.append((sym, price, pct))
+        except Exception:
+            continue
+    return rows
+
+
+def render_ticker_tape():
+    symbols = list(st.session_state.watchlist.keys()) or ["RELIANCE.NS", "AAPL"]
+    data = get_ticker_tape_data(tuple(symbols))
+    if not data:
+        return
+    spans = ""
+    for sym, price, pct in data:
+        css_class = "tick-up" if pct >= 0 else "tick-down"
+        arrow = "▲" if pct >= 0 else "▼"
+        price_str = f"{price:,.2f}" if isinstance(price, (int, float)) else "N/A"
+        spans += f'<span class="{css_class}">{sym} {price_str} {arrow}{abs(pct):.2f}%</span>'
+    html = f'<div class="ticker-wrap"><div class="ticker-move">{spans}{spans}</div></div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+render_ticker_tape()
 
 POPULAR_STOCKS = {
     "Reliance Industries": "RELIANCE.NS",
