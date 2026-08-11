@@ -75,6 +75,42 @@ POPULAR_STOCKS = {
 }
 
 
+# ----------------- SECTOR-WISE PEER MAPPING (for auto stock comparison) -----------------
+SECTOR_PEERS = {
+    "technology": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
+    "software": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS"],
+    "banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS"],
+    "financial services": ["HDFCBANK.NS", "ICICIBANK.NS", "BAJFINANCE.NS", "SBIN.NS"],
+    "automobile": ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "BAJAJ-AUTO.NS", "HEROMOTOCO.NS"],
+    "auto": ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "HEROMOTOCO.NS"],
+    "energy": ["RELIANCE.NS", "ONGC.NS", "IOC.NS", "BPCL.NS"],
+    "oil & gas": ["RELIANCE.NS", "ONGC.NS", "IOC.NS", "BPCL.NS"],
+    "basic materials": ["TATASTEEL.NS", "HINDALCO.NS", "JSWSTEEL.NS", "HINDCOPPER.NS"],
+    "metal": ["TATASTEEL.NS", "HINDALCO.NS", "JSWSTEEL.NS", "HINDCOPPER.NS"],
+    "healthcare": ["SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS"],
+    "pharma": ["SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS"],
+    "consumer cyclical": ["TITAN.NS", "TRENT.NS", "DMART.NS"],
+    "consumer defensive": ["HINDUNILVR.NS", "ITC.NS", "NESTLEIND.NS"],
+    "communication services": ["BHARTIARTL.NS", "IDEA.NS"],
+    "utilities": ["NTPC.NS", "SJVN.NS", "POWERGRID.NS"],
+    "consumer electronics": ["AAPL", "MSFT", "NVDA"],
+}
+
+DEFAULT_PEERS = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS"]
+
+
+def get_auto_peers(symbol, sector, industry):
+    """Suggest 3-4 peer tickers based on the stock's sector/industry, excluding itself."""
+    key_source = f"{sector or ''} {industry or ''}".lower()
+    for key, peers in SECTOR_PEERS.items():
+        if key in key_source:
+            filtered = [p for p in peers if p != symbol]
+            if filtered:
+                return filtered[:4]
+    # Fallback: a few generic large-caps, excluding the stock itself
+    return [p for p in DEFAULT_PEERS if p != symbol][:3]
+
+
 # ----------------- NAME -> TICKER SEARCH -----------------
 @st.cache_data(ttl=3600)
 def search_stock_by_name(query):
@@ -1198,11 +1234,20 @@ if analyze_btn or ticker:
                     " suggestion lo ki kaunsa best buy hai."
                 )
 
+                auto_peers = get_auto_peers(
+                    ticker, info.get("sector"), info.get("industry")
+                )
+                sector_label = info.get("sector", "N/A")
+                st.caption(
+                    f"🏷️ Detected sector: **{sector_label}** — neeche peer stocks"
+                    " apne aap suggest kar diye gaye hain, aap chaho toh edit"
+                    " kar sakte ho."
+                )
+
                 compare_input = st.text_input(
                     "Compare with (comma-separated tickers, e.g. TCS.NS, WIPRO.NS, HCLTECH.NS):",
-                    value="",
-                    key="compare_tickers_input",
-                    placeholder="e.g. TCS.NS, WIPRO.NS, HCLTECH.NS",
+                    value=", ".join(auto_peers),
+                    key=f"compare_tickers_input_{ticker}",
                 )
 
                 if compare_input.strip():
