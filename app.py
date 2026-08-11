@@ -47,12 +47,71 @@ POPULAR_STOCKS = {
     "Microsoft (US)": "MSFT",
 }
 
+
+# ----------------- NAME -> TICKER SEARCH -----------------
+@st.cache_data(ttl=3600)
+def search_stock_by_name(query):
+    """Search Yahoo Finance for a ticker matching a general company name.
+    Returns a list of dicts: [{"symbol": "TSLA", "name": "Tesla, Inc."}, ...]
+    """
+    if not query or len(query.strip()) < 2:
+        return []
+
+    results = []
+
+    # 1. Try yfinance's built-in search (covers global stocks, not just our list)
+    try:
+        search_result = yf.Search(query, max_results=8)
+        for quote in search_result.quotes:
+            symbol = quote.get("symbol")
+            name = quote.get("shortname") or quote.get("longname") or symbol
+            if symbol:
+                results.append({"symbol": symbol, "name": name})
+    except Exception:
+        pass
+
+    # 2. Fallback / supplement: substring match against our curated list
+    if not results:
+        q = query.strip().lower()
+        for name, symbol in POPULAR_STOCKS.items():
+            if q in name.lower():
+                results.append({"symbol": symbol, "name": name})
+
+    return results
+
+
 # ----------------- SIDEBAR -----------------
 st.sidebar.header("🔍 Stock Finder")
 
+st.sidebar.markdown("**Search by Company Name:**")
+name_query = st.sidebar.text_input(
+    "e.g. Tesla, Reliance, Apple",
+    value="",
+    key="name_search_box",
+    placeholder="Type a company name...",
+)
+
+selected_from_search = None
+if name_query.strip():
+    matches = search_stock_by_name(name_query)
+    if matches:
+        options = [f"{m['name']} ({m['symbol']})" for m in matches]
+        picked = st.sidebar.selectbox(
+            "Matching stocks — pick one:",
+            options=["-- Select --"] + options,
+            key="search_match_select",
+        )
+        if picked != "-- Select --":
+            idx = options.index(picked)
+            selected_from_search = matches[idx]["symbol"]
+    else:
+        st.sidebar.caption("No matches found. Try a different name or use the ticker box below.")
+
+st.sidebar.markdown("---")
+
 # Popular stocks dropdown
 selected_company = st.sidebar.selectbox(
-    "Select from Popular Stocks:",
+    "Or select from Popular Stocks:",
     options=["-- Select Stock --"] + list(POPULAR_STOCKS.keys()),
 )
 
@@ -64,9 +123,11 @@ manual_ticker = st.sidebar.text_input(
     placeholder="e.g. NHPC.NS",
 ).strip().upper()
 
-# Logic: Manual Input has priority, otherwise use Selectbox choice
+# Logic: Manual ticker > Name search result > Popular dropdown > default
 if manual_ticker:
     ticker = manual_ticker
+elif selected_from_search:
+    ticker = selected_from_search
 elif selected_company != "-- Select Stock --":
     ticker = POPULAR_STOCKS[selected_company]
 else:
