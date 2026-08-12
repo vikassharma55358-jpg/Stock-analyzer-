@@ -271,35 +271,91 @@ def get_price_range_peers(symbol, current_price, currency, max_results=4, tolera
 
 
 # ----------------- NAME -> TICKER SEARCH -----------------
-@st.cache_data(ttl=3600)
+# Bigger offline fallback list — used ONLY if Yahoo's live search fails/rate-limits
+NAME_TICKER_FALLBACK = {
+    **POPULAR_STOCKS,
+    "Wipro": "WIPRO.NS",
+    "Tech Mahindra": "TECHM.NS",
+    "Larsen & Toubro": "LT.NS",
+    "L&T": "LT.NS",
+    "Axis Bank": "AXISBANK.NS",
+    "Kotak Mahindra Bank": "KOTAKBANK.NS",
+    "Maruti Suzuki": "MARUTI.NS",
+    "Mahindra & Mahindra": "M&M.NS",
+    "Sun Pharma": "SUNPHARMA.NS",
+    "Dr Reddy's": "DRREDDY.NS",
+    "Cipla": "CIPLA.NS",
+    "Divi's Laboratories": "DIVISLAB.NS",
+    "Hindustan Unilever": "HINDUNILVR.NS",
+    "ITC": "ITC.NS",
+    "Nestle India": "NESTLEIND.NS",
+    "Titan Company": "TITAN.NS",
+    "Trent": "TRENT.NS",
+    "Avenue Supermarts (DMart)": "DMART.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "Vodafone Idea": "IDEA.NS",
+    "NTPC": "NTPC.NS",
+    "Power Grid": "POWERGRID.NS",
+    "ONGC": "ONGC.NS",
+    "Indian Oil (IOC)": "IOC.NS",
+    "Bharat Petroleum (BPCL)": "BPCL.NS",
+    "JSW Steel": "JSWSTEEL.NS",
+    "Hindalco": "HINDALCO.NS",
+    "Adani Enterprises": "ADANIENT.NS",
+    "Adani Ports": "ADANIPORTS.NS",
+    "Asian Paints": "ASIANPAINT.NS",
+    "UltraTech Cement": "ULTRACEMCO.NS",
+    "Grasim Industries": "GRASIM.NS",
+    "Coal India": "COALINDIA.NS",
+    "Godrej Consumer": "GODREJCP.NS",
+    "Britannia": "BRITANNIA.NS",
+    "Zomato": "ZOMATO.NS",
+    "Paytm": "PAYTM.NS",
+    "IRCTC": "IRCTC.NS",
+    "Google (Alphabet)": "GOOGL",
+    "Amazon": "AMZN",
+    "Meta (Facebook)": "META",
+    "Netflix": "NFLX",
+    "Berkshire Hathaway": "BRK-B",
+    "JPMorgan Chase": "JPM",
+    "Walmart": "WMT",
+    "Coca-Cola": "KO",
+    "Intel": "INTC",
+    "AMD": "AMD",
+}
+
+
+@st.cache_data(ttl=600)
 def search_stock_by_name(query):
     """Search Yahoo Finance for a ticker matching a general company name.
-    Returns a list of dicts: [{"symbol": "TSLA", "name": "Tesla, Inc."}, ...]
+    Returns (results, error): results = [{"symbol": "TSLA", "name": "Tesla, Inc."}, ...]
+    error = an error message string if the LIVE search failed, else None.
     """
     if not query or len(query.strip()) < 2:
-        return []
+        return [], None
 
     results = []
+    error = None
 
-    # 1. Try yfinance's built-in search (covers global stocks, not just our list)
+    # 1. Try yfinance's built-in live search (covers global stocks, not just our list)
     try:
-        search_result = yf.Search(query, max_results=8)
+        search_result = yf.Search(query, max_results=8, timeout=10)
         for quote in search_result.quotes:
             symbol = quote.get("symbol")
             name = quote.get("shortname") or quote.get("longname") or symbol
             if symbol:
                 results.append({"symbol": symbol, "name": name})
-    except Exception:
-        pass
+    except Exception as e:
+        error = str(e)
 
-    # 2. Fallback / supplement: substring match against our curated list
+    # 2. Fallback / supplement: substring match against our bigger curated list
     if not results:
         q = query.strip().lower()
-        for name, symbol in POPULAR_STOCKS.items():
+        for name, symbol in NAME_TICKER_FALLBACK.items():
             if q in name.lower():
                 results.append({"symbol": symbol, "name": name})
 
-    return results
+    return results, error
 
 
 # ----------------- SIDEBAR -----------------
@@ -315,7 +371,7 @@ name_query = st.sidebar.text_input(
 
 selected_from_search = None
 if name_query.strip():
-    matches = search_stock_by_name(name_query)
+    matches, search_error = search_stock_by_name(name_query)
     if matches:
         options = [f"{m['name']} ({m['symbol']})" for m in matches]
         picked = st.sidebar.selectbox(
@@ -326,8 +382,16 @@ if name_query.strip():
         if picked != "-- Select --":
             idx = options.index(picked)
             selected_from_search = matches[idx]["symbol"]
+    elif search_error:
+        st.sidebar.warning(
+            "⚠️ Live search abhi kaam nahi kar raha (Yahoo rate limit ho sakta"
+            " hai) aur is naam ke liye humari offline list me bhi match nahi"
+            " mila. Thodi der baad try karo ya seedha ticker box use karo."
+        )
     else:
-        st.sidebar.caption("No matches found. Try a different name or use the ticker box below.")
+        st.sidebar.caption(
+            "No matches found. Try a different name or use the ticker box below."
+        )
 
 st.sidebar.markdown("---")
 
@@ -803,6 +867,17 @@ if analyze_btn or ticker:
                 if not pd.isna(df["RSI_14"].iloc[-1])
                 else "N/A"
             )
+
+            # Company Name Header (full name + ticker + exchange/sector)
+            company_name = info.get("longName") or info.get("shortName") or ticker
+            exchange_name = info.get("exchange", info.get("fullExchangeName", ""))
+            sector_name = info.get("sector", "")
+
+            name_line = f"### {company_name}  `{ticker}`"
+            st.markdown(name_line)
+            sub_bits = [b for b in [exchange_name, sector_name] if b]
+            if sub_bits:
+                st.caption(" • ".join(sub_bits))
 
             # Top Metrics Dashboard
             c1, c2, c3, c4, c5, c6 = st.columns(6)
