@@ -33,11 +33,13 @@ st.markdown(
         --td-teal: #5DCAA5;
         --td-coral: #F0997B;
     }
-    .stApp { background-color: var(--td-bg); }
+    .stApp { background-color: var(--td-bg); color: var(--td-text); }
     h1, h2, h3 { font-family: 'Space Grotesk', sans-serif !important; color: var(--td-text) !important; }
     [data-testid="stMetricValue"], [data-testid="stMetricDelta"] {
         font-family: 'IBM Plex Mono', monospace !important;
+        color: var(--td-text) !important;
     }
+    [data-testid="stMetricLabel"] { color: var(--td-muted) !important; }
     [data-testid="stMetric"] {
         background: var(--td-card);
         border-left: 3px solid var(--td-amber);
@@ -45,8 +47,27 @@ st.markdown(
         padding: 12px 14px;
     }
     [data-testid="stSidebar"] { background-color: var(--td-card); }
-    [data-testid="stTabs"] button[aria-selected="true"] {
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3 {
+        color: var(--td-text) !important;
+    }
+    [data-testid="stCaptionContainer"], .stCaption, small {
+        color: var(--td-muted) !important;
+    }
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] span,
+    [data-testid="stMarkdownContainer"] li {
+        color: var(--td-text);
+    }
+    [data-testid="stTabs"] button p { color: var(--td-muted) !important; }
+    [data-testid="stTabs"] button[aria-selected="true"] p {
         color: var(--td-amber) !important;
+    }
+    [data-testid="stTabs"] button[aria-selected="true"] {
         border-bottom-color: var(--td-amber) !important;
     }
     div[data-baseweb="tab-list"] { border-bottom: 1px solid var(--td-border); }
