@@ -107,7 +107,6 @@ st.markdown(
 # ----------------- PORTFOLIO PERSISTENCE -----------------
 PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portfolio_data.json")
 
-
 def load_portfolio():
     try:
         if os.path.exists(PORTFOLIO_FILE):
@@ -122,7 +121,6 @@ def load_portfolio():
         "AAPL": {"quantity": 0.0, "buy_price": 0.0},
     }
 
-
 def save_portfolio(data):
     try:
         with open(PORTFOLIO_FILE, "w") as f:
@@ -130,15 +128,13 @@ def save_portfolio(data):
     except Exception:
         pass
 
-
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = load_portfolio()
 
 st.title("📈 AI Stock, News & Smart Entry Evaluator")
 
-
 # ----------------- LIVE SCROLLING TICKER TAPE (OPTIMIZED) -----------------
-@st.cache_data(ttl=600)  # Increased TTL to 10 mins to avoid Rate Limits
+@st.cache_data(ttl=600)
 def get_ticker_tape_data(symbols):
     rows = []
     if not symbols:
@@ -161,7 +157,6 @@ def get_ticker_tape_data(symbols):
         pass
     return rows
 
-
 def render_ticker_tape():
     symbols = list(st.session_state.watchlist.keys()) or ["RELIANCE.NS", "AAPL"]
     data = get_ticker_tape_data(tuple(symbols))
@@ -175,7 +170,6 @@ def render_ticker_tape():
         spans += f'<span class="{css_class}">{sym} {price_str} {arrow}{abs(pct):.2f}%</span>'
     html = f'<div class="ticker-wrap"><div class="ticker-move">{spans}{spans}</div></div>'
     st.markdown(html, unsafe_allow_html=True)
-
 
 render_ticker_tape()
 
@@ -203,11 +197,10 @@ SECTOR_PEERS = {
     "banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "AXISBANK.NS"],
     "automobile": ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "HEROMOTOCO.NS"],
     "energy": ["RELIANCE.NS", "ONGC.NS", "IOC.NS", "BPCL.NS"],
-    "basic materials": ["TATASTEEL.NS", "HINDALCO.NS", "JSWSTEEL.NS"],
+    "basic materials": ["TATASTEEL.NS", "HINDALCO.NS", "JSWSTEEL.NS", "HINDCOPPER.NS"],
 }
 
 DEFAULT_PEERS = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS"]
-
 
 def get_auto_peers(symbol, sector, industry):
     key_source = f"{sector or ''} {industry or ''}".lower()
@@ -217,7 +210,6 @@ def get_auto_peers(symbol, sector, industry):
             if filtered:
                 return filtered[:3]
     return [p for p in DEFAULT_PEERS if p != symbol][:3]
-
 
 NAME_TICKER_FALLBACK = {
     **POPULAR_STOCKS,
@@ -231,7 +223,6 @@ NAME_TICKER_FALLBACK = {
     "Google (Alphabet)": "GOOGL",
     "Amazon": "AMZN",
 }
-
 
 @st.cache_data(ttl=1800)
 def search_stock_by_name(query):
@@ -257,7 +248,6 @@ def search_stock_by_name(query):
                 results.append({"symbol": symbol, "name": name})
 
     return results, error
-
 
 # ----------------- SIDEBAR -----------------
 st.sidebar.header("🔍 Stock Finder")
@@ -310,8 +300,8 @@ st.sidebar.caption("💡 Indian stocks ke aage `.NS` zaroor lagayein.")
 # --- PORTFOLIO MANAGER ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("⭐ Portfolio Manager")
-add_qty = st.sidebar.number_input("Quantity", min_value=0.0, value=1.0, step=1.0)
-add_buy_price = st.sidebar.number_input(f"Buy Price ({ticker}):", min_value=0.0, value=0.0, step=1.0)
+add_qty = st.sidebar.number_input("Quantity", min_value=0.0, value=1.0, step=1.0, key="add_qty")
+add_buy_price = st.sidebar.number_input(f"Buy Price ({ticker}):", min_value=0.0, value=0.0, step=1.0, key="add_buy_price")
 
 if st.sidebar.button(f"➕ Add '{ticker}' to Portfolio"):
     st.session_state.watchlist[ticker] = {"quantity": add_qty, "buy_price": add_buy_price}
@@ -319,9 +309,32 @@ if st.sidebar.button(f"➕ Add '{ticker}' to Portfolio"):
     st.sidebar.success(f"Added {ticker}!")
     st.rerun()
 
+if st.session_state.watchlist:
+    selected_to_remove = st.sidebar.selectbox(
+        "Remove Stock:",
+        options=["Select Stock"] + list(st.session_state.watchlist.keys()),
+        key="remove_stock_select",
+    )
+    if selected_to_remove != "Select Stock":
+        if st.sidebar.button(f"❌ Remove {selected_to_remove}"):
+            del st.session_state.watchlist[selected_to_remove]
+            save_portfolio(st.session_state.watchlist)
+            st.sidebar.success(f"Removed {selected_to_remove}")
+            st.rerun()
 
 # ----------------- CACHED DATA FETCHERS -----------------
-@st.cache_data(ttl=900)  # Cached for 15 mins to limit Rate Limit errors
+def format_market_cap(val, symbol):
+    if val == "N/A" or not isinstance(val, (int, float)):
+        return "N/A"
+    if val >= 1e12:
+        return f"₹{val / 1e12:.2f} Lakh Cr" if "NS" in symbol else f"${val / 1e12:.2f}T"
+    elif val >= 1e7 and "NS" in symbol:
+        return f"₹{val / 1e7:.2f} Cr"
+    elif val >= 1e9:
+        return f"${val / 1e9:.2f}B"
+    return f"{val}"
+
+@st.cache_data(ttl=900)
 def fetch_stock_data(symbol):
     try:
         stock = yf.Ticker(symbol)
@@ -342,11 +355,22 @@ def fetch_stock_data(symbol):
         rs = gain / loss.replace(0, 1e-10)
         df["RSI_14"] = 100 - (100 / (1 + rs))
 
+        df["BB_Middle"] = df["Close"].rolling(window=20).mean()
+        df["BB_Std"] = df["Close"].rolling(window=20).std()
+        df["BB_Upper"] = df["BB_Middle"] + (df["BB_Std"] * 2)
+        df["BB_Lower"] = df["BB_Middle"] - (df["BB_Std"] * 2)
+
+        exp1 = df["Close"].ewm(span=12, adjust=False).mean()
+        exp2 = df["Close"].ewm(span=26, adjust=False).mean()
+        df["MACD"] = exp1 - exp2
+        df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+        df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
+
         info = {}
         try:
             info = stock.info or {}
         except Exception:
-            pass  # Fallback if info endpoint rate limits
+            pass
 
         meta = {
             "regularMarketPrice": info.get("currentPrice", float(df["Close"].iloc[-1])),
@@ -360,11 +384,10 @@ def fetch_stock_data(symbol):
         return df, meta, info
     except Exception as e:
         if "Too Many Requests" in str(e):
-            st.error("🚨 Yahoo Finance Rate Limit! Thodi der (5 min) baad retry karein.")
+            st.error("🚨 Yahoo Finance Rate Limit! Thodi der baad retry karein.")
         else:
             st.error(f"Error loading stock data: {e}")
         return None, {}, {}
-
 
 @st.cache_data(ttl=1200)
 def fetch_stock_news(search_term):
@@ -385,6 +408,59 @@ def fetch_stock_news(search_term):
         pass
     return news_items
 
+@st.cache_data(ttl=900)
+def fetch_comparison_data(symbol):
+    try:
+        stock = yf.Ticker(symbol)
+        info = stock.info or {}
+        price = info.get("currentPrice", info.get("regularMarketPrice", "N/A"))
+        pe = info.get("trailingPE", info.get("forwardPE", "N/A"))
+        pb = info.get("priceToBook", "N/A")
+        target = info.get("targetMeanPrice", "N/A")
+        rec = str(info.get("recommendationKey", "N/A")).upper()
+        mcap = info.get("marketCap", "N/A")
+        currency = info.get("currency", "INR" if symbol.endswith(".NS") else "USD")
+
+        return {
+            "Ticker": symbol,
+            "Price": round(price, 2) if isinstance(price, (int, float)) else "N/A",
+            "P/E": round(pe, 2) if isinstance(pe, (int, float)) else "N/A",
+            "P/B": round(pb, 2) if isinstance(pb, (int, float)) else "N/A",
+            "Target Price": round(target, 2) if isinstance(target, (int, float)) else "N/A",
+            "Recommendation": rec,
+            "Market Cap": format_market_cap(mcap, symbol),
+            "Currency": currency,
+        }
+    except Exception:
+        return {
+            "Ticker": symbol, "Price": "N/A", "P/E": "N/A", "P/B": "N/A",
+            "Target Price": "N/A", "Recommendation": "N/A", "Market Cap": "N/A", "Currency": "N/A"
+        }
+
+# ----------------- AI GENERATORS -----------------
+def get_ai_analysis(ticker_sym, curr_price, target_mean, rec_key, rsi, pe, key):
+    try:
+        client = genai.Client(api_key=key)
+        prompt = f"""
+        Act as a top stock analyst. Analyze '{ticker_sym}'.
+        - Current Price: {curr_price}
+        - Target Price: {target_mean}
+        - Consensus Rating: {rec_key}
+        - RSI: {rsi}
+        - P/E: {pe}
+
+        Provide a concise research report in Hinglish:
+        1. Verdict (BUY / HOLD / SELL)
+        2. Valuation check (P/E & RSI)
+        3. Key Catalysts / Market Factors
+        4. Target & Key Risks.
+        """
+        response = client.models.generate_content(
+            model="gemini-2.5-flash", contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        return f"AI Generation Error: {e}"
 
 # ----------------- MAIN UI -----------------
 analyze_btn = st.sidebar.button("Analyze Stock 🚀")
@@ -403,22 +479,64 @@ if analyze_btn or ticker:
 
             change = curr_price - prev_close
             pct_change = (change / prev_close * 100) if prev_close != 0 else 0
+            currency = meta.get("currency", "INR")
+
+            mcap_raw = info.get("marketCap", "N/A")
+            mcap_str = format_market_cap(mcap_raw, ticker)
+
+            pe_ratio = info.get("trailingPE", info.get("forwardPE", "N/A"))
+            pe_str = f"{pe_ratio:.2f}" if isinstance(pe_ratio, (int, float)) else "N/A"
+
+            raw_target = info.get("targetMeanPrice", "N/A")
+            target_mean = float(raw_target) if isinstance(raw_target, (int, float)) else "N/A"
+            rec_key = str(info.get("recommendationKey", "N/A")).upper()
+
+            latest_rsi = f"{df['RSI_14'].iloc[-1]:.1f}" if not pd.isna(df["RSI_14"].iloc[-1]) else "N/A"
 
             company_name = info.get("longName") or info.get("shortName") or ticker
             st.markdown(f"### {company_name} `{ticker}`")
 
-            # Basic KPI Cards
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Current Price", f"{curr_price:,.2f}", f"{pct_change:.2f}%")
-            col2.metric("52W High", f"{df['High'].max():,.2f}")
-            col3.metric("52W Low", f"{df['Low'].min():,.2f}")
-            col4.metric("RSI (14)", f"{df['RSI_14'].iloc[-1]:.1f}" if not pd.isna(df['RSI_14'].iloc[-1]) else "N/A")
+            # KPI CARDS WITH FULL PARAMETERS
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            c1.metric("Current Price", f"{curr_price:,.2f} {currency}", f"{pct_change:.2f}%")
+            c2.metric("Market Cap", mcap_str)
+            c3.metric("P/E Ratio", pe_str)
+            c4.metric("RSI (14D)", latest_rsi)
+            c5.metric("Analyst Target", f"{target_mean}" if target_mean != "N/A" else "N/A")
+            c6.metric("Consensus", rec_key)
 
-            # Chart
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
-            fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_50'], name="SMA 50", line=dict(color='yellow', width=1)), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_200'], name="SMA 200", line=dict(color='blue', width=1)), row=1, col=1)
-            fig.add_trace(go.Bar(x=df['Date'], y=df['Volume'], name="Volume"), row=2, col=1)
-            fig.update_layout(template="plotly_dark", height=500, margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            # TABS STRUCTURE
+            tab_chart, tab_ai, tab_peers, tab_news = st.tabs(["📊 Interactive Chart", "🤖 AI Research", "⚔️ Peer Comparison", "📰 News"])
+
+            with tab_chart:
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.7, 0.3])
+                fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_50'], name="SMA 50", line=dict(color='yellow', width=1)), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_200'], name="SMA 200", line=dict(color='blue', width=1)), row=1, col=1)
+                fig.add_trace(go.Bar(x=df['Date'], y=df['Volume'], name="Volume"), row=2, col=1)
+                fig.update_layout(template="plotly_dark", height=500, margin=dict(l=10, r=10, t=20, b=10))
+                st.plotly_chart(fig, use_container_width=True)
+
+            with tab_ai:
+                if st.button("Generate AI Research Report 📑"):
+                    if GEMINI_API_KEY:
+                        ai_report = get_ai_analysis(ticker, curr_price, target_mean, rec_key, latest_rsi, pe_str, GEMINI_API_KEY)
+                        st.markdown(ai_report)
+                    else:
+                        st.warning("Please configure your GEMINI_API_KEY in .env file.")
+
+            with tab_peers:
+                sector = info.get("sector", "")
+                industry = info.get("industry", "")
+                auto_peers = get_auto_peers(ticker, sector, industry)
+                peer_data = [fetch_comparison_data(p) for p in auto_peers]
+                peer_data.insert(0, fetch_comparison_data(ticker))
+                st.dataframe(pd.DataFrame(peer_data), hide_index=True, use_container_width=True)
+
+            with tab_news:
+                if news_data:
+                    for item in news_data:
+                        st.markdown(f"**[{item['title']}]({item['link']})**")
+                        st.caption(f"Published: {item['date']}")
+                else:
+                    st.info("No recent news found.")
