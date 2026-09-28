@@ -1,0 +1,7 @@
+.env
+*.env
+__pycache__/
+.venv/
+venv/
+portfolio_data.json
+secrets.toml
