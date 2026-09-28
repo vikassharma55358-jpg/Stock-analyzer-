@@ -99,10 +99,108 @@ st.markdown(
         0% { transform: translateX(0); }
         100% { transform: translateX(-100%); }
     }
+
+    /* ===== AI Structured Cards ===== */
+    .ai-card {
+        background: var(--td-card);
+        border: 1px solid var(--td-border);
+        border-radius: 12px;
+        padding: 18px 20px;
+        margin: 12px 0 8px 0;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    }
+    .ai-card-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 4px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--td-border);
+    }
+    .ai-card-title {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--td-text);
+        margin: 0;
+    }
+    .verdict-badge {
+        display: inline-block;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 5px 12px;
+        border-radius: 20px;
+        letter-spacing: 0.4px;
+        text-transform: uppercase;
+    }
+    .verdict-buy, .verdict-good, .verdict-subscribe {
+        background: rgba(93, 202, 165, 0.18);
+        color: var(--td-teal);
+        border: 1px solid rgba(93, 202, 165, 0.45);
+    }
+    .verdict-hold, .verdict-neutral, .verdict-risky {
+        background: rgba(239, 159, 39, 0.15);
+        color: var(--td-amber);
+        border: 1px solid rgba(239, 159, 39, 0.4);
+    }
+    .verdict-sell, .verdict-bearish, .verdict-avoid, .verdict-wait {
+        background: rgba(240, 153, 123, 0.15);
+        color: var(--td-coral);
+        border: 1px solid rgba(240, 153, 123, 0.4);
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+# ----------------- AI CARD RENDERER -----------------
+def _detect_verdict(text: str):
+    """Detect verdict keyword from AI text and return (label, css_class)."""
+    upper = text.upper()
+    checks = [
+        ("GOOD ENTRY", "GOOD ENTRY", "verdict-good"),
+        ("WAIT FOR DIP", "WAIT FOR DIP", "verdict-wait"),
+        ("BEST PICK", "BEST PICK", "verdict-buy"),
+        ("SUBSCRIBE", "SUBSCRIBE", "verdict-subscribe"),
+        ("BULLISH", "BULLISH", "verdict-buy"),
+        ("BEARISH", "BEARISH", "verdict-bearish"),
+        ("BUY", "BUY", "verdict-buy"),
+        ("SELL", "SELL", "verdict-sell"),
+        ("HOLD", "HOLD", "verdict-hold"),
+        ("NEUTRAL", "NEUTRAL", "verdict-neutral"),
+        ("RISKY", "RISKY", "verdict-risky"),
+        ("AVOID", "AVOID", "verdict-avoid"),
+        ("WAIT", "WAIT", "verdict-wait"),
+    ]
+    for keyword, label, css in checks:
+        if keyword in upper:
+            return label, css
+    return "ANALYSIS", "verdict-hold"
+
+
+def render_ai_card(title: str, content: str, icon: str = "🤖"):
+    """Render AI response inside a styled card with auto-detected verdict badge."""
+    if not content or ("Error" in content and content.startswith("AI ")):
+        st.error(content)
+        return
+
+    label, css_class = _detect_verdict(content)
+
+    st.markdown(
+        f"""
+        <div class="ai-card">
+            <div class="ai-card-header">
+                <span class="ai-card-title">{icon} {title}</span>
+                <span class="verdict-badge {css_class}">{label}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(border=True):
+        st.markdown(content)
+
 
 # ----------------- PORTFOLIO PERSISTENCE (saved to a JSON file on disk) -----------------
 PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portfolio_data.json")
@@ -465,44 +563,59 @@ if st.session_state.watchlist:
 
 # ----------------- CACHED DATA FETCHERS (YFINANCE) -----------------
 @st.cache_data(ttl=300)
-def fetch_stock_data(symbol):
+def fetch_stock_data(symbol, period="1y"):
     try:
         stock = yf.Ticker(symbol)
 
-        # 1. Historical Chart Data
-        df = stock.history(period="1y")
+        # Intraday intervals for short periods
+        interval = "1d"
+        if period == "1d":
+            interval = "5m"
+        elif period == "5d":
+            interval = "15m"
+        elif period == "1mo":
+            interval = "1h"
+
+        df = stock.history(period=period, interval=interval)
+        if df.empty:
+            df = stock.history(period=period, interval="1d")
         if df.empty:
             return None, {}, {}
 
         df = df.reset_index()
 
-        # SMA
-        df["SMA_50"] = df["Close"].rolling(window=50).mean()
-        df["SMA_200"] = df["Close"].rolling(window=200).mean()
+        # Adaptive windows based on available bars
+        n = len(df)
+        sma_short = min(50, max(5, n // 4))
+        sma_long = min(200, max(10, n // 2))
+        rsi_window = min(14, max(5, n // 5))
+        bb_window = min(20, max(5, n // 4))
 
-        # Safe RSI (14 Days)
+        df["SMA_50"] = df["Close"].rolling(window=sma_short).mean()
+        df["SMA_200"] = df["Close"].rolling(window=sma_long).mean()
+
         delta = df["Close"].diff()
-        gain = delta.clip(lower=0).rolling(window=14).mean()
-        loss = (-delta.clip(upper=0)).rolling(window=14).mean()
-
-        # Prevent division by zero
+        gain = delta.clip(lower=0).rolling(window=rsi_window).mean()
+        loss = (-delta.clip(upper=0)).rolling(window=rsi_window).mean()
         rs = gain / loss.replace(0, 1e-10)
         df["RSI_14"] = 100 - (100 / (1 + rs))
 
-        # Bollinger Bands
-        df["BB_Middle"] = df["Close"].rolling(window=20).mean()
-        df["BB_Std"] = df["Close"].rolling(window=20).std()
+        df["BB_Middle"] = df["Close"].rolling(window=bb_window).mean()
+        df["BB_Std"] = df["Close"].rolling(window=bb_window).std()
         df["BB_Upper"] = df["BB_Middle"] + (df["BB_Std"] * 2)
         df["BB_Lower"] = df["BB_Middle"] - (df["BB_Std"] * 2)
 
-        # MACD
-        exp1 = df["Close"].ewm(span=12, adjust=False).mean()
-        exp2 = df["Close"].ewm(span=26, adjust=False).mean()
-        df["MACD"] = exp1 - exp2
-        df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
-        df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
+        if n >= 30:
+            exp1 = df["Close"].ewm(span=12, adjust=False).mean()
+            exp2 = df["Close"].ewm(span=26, adjust=False).mean()
+            df["MACD"] = exp1 - exp2
+            df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
+            df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
+        else:
+            df["MACD"] = 0.0
+            df["MACD_Signal"] = 0.0
+            df["MACD_Hist"] = 0.0
 
-        # 2. Key Metadata & Fundamentals
         info = stock.info or {}
 
         meta = {
@@ -623,10 +736,12 @@ def evaluate_custom_buy_price(
         - P/E Ratio: {pe}
         
         Use live search to see any latest breaking news or structural triggers for {ticker_sym}.
-        Answer clearly in simple Hinglish (mix of Hindi + English):
-        1. **Verdict**: Should the user buy at {user_price}? (GOOD ENTRY / RISKY / WAIT FOR DIP)
+        Answer clearly in simple Hinglish (mix of Hindi + English).
+        Start the response with exactly one of these verdict words on the first line: GOOD ENTRY / RISKY / WAIT FOR DIP
+        Then cover:
+        1. **Verdict explanation**: Why this verdict for price {user_price}.
         2. **Risk to Reward Ratio**: Evaluate if buying at {user_price} leaves enough profit upside compared to the Target ({target_mean}).
-        3. **Suggested Entry Zone & Stop Loss**: Give a clear suggested buying range and strict stop-loss price.
+        3. **Suggested Entry Zone & Stop Loss**: Clear buying range and strict stop-loss price.
         Keep it direct and actionable with bullet points.
         """
         response = client.models.generate_content(
@@ -648,8 +763,10 @@ def analyze_news_sentiment(news_list, ticker_sym, key):
         {headlines}
         
         Search for any additional real-time updates/breaking news about {ticker_sym} online.
-        Provide a response in simple Hinglish:
-        1. Overall News Sentiment: (BULLISH 🟢 / BEARISH 🔴 / NEUTRAL 🟡)
+        Provide a response in simple Hinglish.
+        Start the response with exactly one word: BULLISH / BEARISH / NEUTRAL
+        Then cover:
+        1. Overall News Sentiment explanation.
         2. Key Market Catalysts or Deals mentioned.
         3. Short-term price impact.
         """
@@ -678,10 +795,12 @@ def get_ai_analysis(
         
         Perform a live Google Search to fetch recent quarterly results, corporate actions, or major market developments for '{ticker_sym}'.
         
-        Provide a research report in Hinglish:
-        1. Verdict (BUY / HOLD / SELL)
-        2. Valuation check (P/E & RSI)
-        3. Live Catalysts / Market Factors (from real-time web search)
+        Provide a research report in Hinglish.
+        Start the response with exactly one word: BUY / HOLD / SELL
+        Then cover:
+        1. Verdict explanation.
+        2. Valuation check (P/E & RSI).
+        3. Live Catalysts / Market Factors (from real-time web search).
         4. Target & Key Risks.
         """
         response = client.models.generate_content(
@@ -787,13 +906,12 @@ def get_comparison_suggestion(primary_ticker, comparison_rows, key):
         Use live Google Search to check recent news, results, or developments for these
         stocks that could affect the decision.
 
-        Answer in simple Hinglish (Hindi + English mix):
-        1. **Best Pick**: Among all the stocks listed (including '{primary_ticker}'), which
-           one looks like the best buy right now, and why.
-        2. **Why not the others**: One short line each on why the other stocks are
-           relatively weaker choices right now.
-        3. **Final Verdict on '{primary_ticker}'**: Should the user go ahead and buy
-           '{primary_ticker}' specifically, or is there a clearly better alternative here?
+        Answer in simple Hinglish (Hindi + English mix).
+        Start the response with: BEST PICK: <TICKER>
+        Then cover:
+        1. **Best Pick**: Why this stock looks like the best buy right now.
+        2. **Why not the others**: One short line each on why the other stocks are relatively weaker.
+        3. **Final Verdict on '{primary_ticker}'**: Should the user buy '{primary_ticker}' or is there a better alternative?
         Keep it concise, use bullet points, be direct.
         """
         response = client.models.generate_content(
@@ -975,8 +1093,7 @@ if analyze_btn or ticker:
                                     pe_str,
                                     GEMINI_API_KEY,
                                 )
-                                st.markdown("### 🤖 Entry Signal Report")
-                                st.markdown(eval_report)
+                                render_ai_card("Entry Signal Report", eval_report, icon="🎯")
                         else:
                             st.error(
                                 "`.env` file me GEMINI_API_KEY set nahi hai."
@@ -993,6 +1110,34 @@ if analyze_btn or ticker:
                     "📊 Advanced Technical Chart (Bollinger Bands, RSI & MACD)"
                 )
 
+                # ----- Multi-Timeframe Selector -----
+                TIMEFRAMES = {
+                    "1D": "1d",
+                    "5D": "5d",
+                    "1M": "1mo",
+                    "3M": "3mo",
+                    "6M": "6mo",
+                    "1Y": "1y",
+                    "5Y": "5y",
+                }
+                tf_labels = list(TIMEFRAMES.keys())
+                selected_tf = st.radio(
+                    "Timeframe",
+                    options=tf_labels,
+                    index=5,  # default 1Y
+                    horizontal=True,
+                    key=f"tf_select_{ticker}",
+                    label_visibility="collapsed",
+                )
+                chart_period = TIMEFRAMES[selected_tf]
+
+                chart_df, _, _ = fetch_stock_data(ticker, period=chart_period)
+                if chart_df is None or chart_df.empty:
+                    st.warning("Is timeframe ke liye data nahi mila.")
+                    chart_df = df
+
+                show_sma200 = len(chart_df) >= 100
+
                 fig = make_subplots(
                     rows=3,
                     cols=1,
@@ -1000,19 +1145,19 @@ if analyze_btn or ticker:
                     vertical_spacing=0.05,
                     row_heights=[0.5, 0.25, 0.25],
                     subplot_titles=(
-                        "Price, SMA & Bollinger Bands",
-                        "RSI (14)",
+                        f"Price, SMA & Bollinger Bands  ({selected_tf})",
+                        "RSI",
                         "MACD (12, 26, 9)",
                     ),
                 )
 
                 fig.add_trace(
                     go.Candlestick(
-                        x=df["Date"],
-                        open=df["Open"],
-                        high=df["High"],
-                        low=df["Low"],
-                        close=df["Close"],
+                        x=chart_df["Date"],
+                        open=chart_df["Open"],
+                        high=chart_df["High"],
+                        low=chart_df["Low"],
+                        close=chart_df["Close"],
                         name="Price",
                     ),
                     row=1,
@@ -1020,8 +1165,8 @@ if analyze_btn or ticker:
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=df["Date"],
-                        y=df["BB_Upper"],
+                        x=chart_df["Date"],
+                        y=chart_df["BB_Upper"],
                         line=dict(color="rgba(173, 216, 230, 0.5)", width=1),
                         name="BB Upper",
                     ),
@@ -1030,8 +1175,8 @@ if analyze_btn or ticker:
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=df["Date"],
-                        y=df["BB_Lower"],
+                        x=chart_df["Date"],
+                        y=chart_df["BB_Lower"],
                         line=dict(color="rgba(173, 216, 230, 0.5)", width=1),
                         fill="tonexty",
                         fillcolor="rgba(173, 216, 230, 0.1)",
@@ -1042,30 +1187,30 @@ if analyze_btn or ticker:
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=df["Date"],
-                        y=df["SMA_50"],
+                        x=chart_df["Date"],
+                        y=chart_df["SMA_50"],
                         line=dict(color="orange", width=1.2),
-                        name="50 SMA",
+                        name="SMA Short",
                     ),
                     row=1,
                     col=1,
                 )
-                fig.add_trace(
-                    go.Scatter(
-                        x=df["Date"],
-                        y=df["SMA_200"],
-                        line=dict(color="cyan", width=1.2),
-                        name="200 SMA",
-                    ),
-                    row=1,
-                    col=1,
-                )
+                if show_sma200:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=chart_df["Date"],
+                            y=chart_df["SMA_200"],
+                            line=dict(color="cyan", width=1.2),
+                            name="SMA Long",
+                        ),
+                        row=1,
+                        col=1,
+                    )
 
-                # RSI
                 fig.add_trace(
                     go.Scatter(
-                        x=df["Date"],
-                        y=df["RSI_14"],
+                        x=chart_df["Date"],
+                        y=chart_df["RSI_14"],
                         line=dict(color="purple", width=1.5),
                         name="RSI",
                     ),
@@ -1079,11 +1224,10 @@ if analyze_btn or ticker:
                     y=30, line_dash="dash", line_color="green", row=2, col=1
                 )
 
-                # MACD
                 fig.add_trace(
                     go.Scatter(
-                        x=df["Date"],
-                        y=df["MACD"],
+                        x=chart_df["Date"],
+                        y=chart_df["MACD"],
                         line=dict(color="blue", width=1.5),
                         name="MACD",
                     ),
@@ -1092,8 +1236,8 @@ if analyze_btn or ticker:
                 )
                 fig.add_trace(
                     go.Scatter(
-                        x=df["Date"],
-                        y=df["MACD_Signal"],
+                        x=chart_df["Date"],
+                        y=chart_df["MACD_Signal"],
                         line=dict(color="orange", width=1.5, dash="dot"),
                         name="Signal",
                     ),
@@ -1102,12 +1246,13 @@ if analyze_btn or ticker:
                 )
 
                 colors = [
-                    "green" if val >= 0 else "red" for val in df["MACD_Hist"]
+                    "green" if val >= 0 else "red"
+                    for val in chart_df["MACD_Hist"]
                 ]
                 fig.add_trace(
                     go.Bar(
-                        x=df["Date"],
-                        y=df["MACD_Hist"],
+                        x=chart_df["Date"],
+                        y=chart_df["MACD_Hist"],
                         marker_color=colors,
                         name="Histogram",
                     ),
@@ -1121,6 +1266,12 @@ if analyze_btn or ticker:
                     height=750,
                 )
                 st.plotly_chart(fig, use_container_width=True)
+
+                st.caption(
+                    f"Showing **{selected_tf}** data · "
+                    f"{'SMA Long visible' if show_sma200 else 'SMA Long hidden (insufficient bars)'} · "
+                    f"Bars: {len(chart_df)}"
+                )
 
             # TAB 3: FUNDAMENTALS
             with tab3:
@@ -1271,7 +1422,7 @@ if analyze_btn or ticker:
                                     sentiment_report = analyze_news_sentiment(
                                         news_data, clean_symbol, GEMINI_API_KEY
                                     )
-                                    st.markdown(sentiment_report)
+                                    render_ai_card("News Sentiment Analysis", sentiment_report, icon="🧠")
                         else:
                             st.error(
                                 "`.env` file me GEMINI_API_KEY set nahi hai."
@@ -1294,7 +1445,7 @@ if analyze_btn or ticker:
                                 pe_str,
                                 GEMINI_API_KEY,
                             )
-                            st.markdown(report)
+                            render_ai_card("AI Financial Verdict", report, icon="🤖")
                 else:
                     st.error("`.env` file me GEMINI_API_KEY set nahi hai.")
 
@@ -1451,7 +1602,7 @@ if analyze_btn or ticker:
                                 ipo_report = get_ipo_suggestions(
                                     GEMINI_API_KEY, risk_profile
                                 )
-                                st.markdown(ipo_report)
+                                render_ai_card("AI IPO Suggestions", ipo_report, icon="🆕")
                     else:
                         st.error(
                             "`.env` file me GEMINI_API_KEY set nahi hai."
@@ -1575,8 +1726,7 @@ if analyze_btn or ticker:
                                 suggestion = get_comparison_suggestion(
                                     ticker, comparison_rows, GEMINI_API_KEY
                                 )
-                                st.markdown("### 🤖 AI Suggestion")
-                                st.markdown(suggestion)
+                                render_ai_card("AI Buy Suggestion", suggestion, icon="🆚")
                     else:
                         st.error(
                             "`.env` file me GEMINI_API_KEY set nahi hai."
