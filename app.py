@@ -640,6 +640,49 @@ def fetch_stock_data(symbol, period="1y"):
         return None, {}, {}
 
 
+def compute_support_resistance(df, num_levels=3, window=5):
+    """Find simple swing-based support & resistance levels from OHLC data."""
+    if df is None or len(df) < window * 2 + 1:
+        return [], []
+
+    highs = df["High"].values
+    lows = df["Low"].values
+    n = len(df)
+
+    res_levels = []
+    sup_levels = []
+
+    for i in range(window, n - window):
+        # Local resistance (swing high)
+        if highs[i] == max(highs[i - window : i + window + 1]):
+            res_levels.append(float(highs[i]))
+        # Local support (swing low)
+        if lows[i] == min(lows[i - window : i + window + 1]):
+            sup_levels.append(float(lows[i]))
+
+    def _cluster(levels, tolerance_pct=0.015):
+        """Merge nearby levels into clusters and take mean of each cluster."""
+        if not levels:
+            return []
+        levels = sorted(levels)
+        clusters = [[levels[0]]]
+        for lv in levels[1:]:
+            if abs(lv - clusters[-1][-1]) / clusters[-1][-1] <= tolerance_pct:
+                clusters[-1].append(lv)
+            else:
+                clusters.append([lv])
+        # Prefer clusters with more touches, then return mean
+        scored = sorted(
+            [(len(c), sum(c) / len(c)) for c in clusters],
+            key=lambda x: (-x[0], -x[1]),
+        )
+        return [round(mean, 2) for _, mean in scored[:num_levels]]
+
+    resistances = sorted(_cluster(res_levels), reverse=True)
+    supports = sorted(_cluster(sup_levels))
+    return supports, resistances
+
+
 @st.cache_data(ttl=600)
 def fetch_stock_news(search_term):
     url = f"https://news.google.com/rss/search?q={search_term}+stock+news&hl=en-IN&gl=IN&ceid=IN:en"
@@ -1107,7 +1150,7 @@ if analyze_btn or ticker:
             # TAB 2: TECHNICAL CHARTS
             with tab2:
                 st.subheader(
-                    "📊 Advanced Technical Chart (Bollinger Bands, RSI & MACD)"
+                    "📊 Advanced Technical Chart (Volume, S/R, RSI & MACD)"
                 )
 
                 # ----- Multi-Timeframe Selector -----
@@ -1137,20 +1180,26 @@ if analyze_btn or ticker:
                     chart_df = df
 
                 show_sma200 = len(chart_df) >= 100
+                has_volume = "Volume" in chart_df.columns and chart_df["Volume"].sum() > 0
+
+                # Support & Resistance levels
+                supports, resistances = compute_support_resistance(chart_df)
 
                 fig = make_subplots(
-                    rows=3,
+                    rows=4,
                     cols=1,
                     shared_xaxes=True,
-                    vertical_spacing=0.05,
-                    row_heights=[0.5, 0.25, 0.25],
+                    vertical_spacing=0.04,
+                    row_heights=[0.42, 0.16, 0.21, 0.21],
                     subplot_titles=(
-                        f"Price, SMA & Bollinger Bands  ({selected_tf})",
+                        f"Price, SMA, Bollinger & S/R  ({selected_tf})",
+                        "Volume",
                         "RSI",
                         "MACD (12, 26, 9)",
                     ),
                 )
 
+                # --- Row 1: Price + BB + SMA + S/R ---
                 fig.add_trace(
                     go.Candlestick(
                         x=chart_df["Date"],
@@ -1207,6 +1256,69 @@ if analyze_btn or ticker:
                         col=1,
                     )
 
+                # Support lines (green)
+                for i, lvl in enumerate(supports):
+                    fig.add_hline(
+                        y=lvl,
+                        line_dash="dot",
+                        line_color="rgba(93, 202, 165, 0.85)",
+                        line_width=1.2,
+                        annotation_text=f"S {lvl}",
+                        annotation_position="bottom right",
+                        annotation_font_color="#5DCAA5",
+                        annotation_font_size=10,
+                        row=1,
+                        col=1,
+                    )
+
+                # Resistance lines (coral/red)
+                for i, lvl in enumerate(resistances):
+                    fig.add_hline(
+                        y=lvl,
+                        line_dash="dot",
+                        line_color="rgba(240, 153, 123, 0.85)",
+                        line_width=1.2,
+                        annotation_text=f"R {lvl}",
+                        annotation_position="top right",
+                        annotation_font_color="#F0997B",
+                        annotation_font_size=10,
+                        row=1,
+                        col=1,
+                    )
+
+                # --- Row 2: Volume ---
+                if has_volume:
+                    vol_colors = [
+                        "rgba(93, 202, 165, 0.7)"
+                        if c >= o
+                        else "rgba(240, 153, 123, 0.7)"
+                        for o, c in zip(chart_df["Open"], chart_df["Close"])
+                    ]
+                    fig.add_trace(
+                        go.Bar(
+                            x=chart_df["Date"],
+                            y=chart_df["Volume"],
+                            marker_color=vol_colors,
+                            name="Volume",
+                            showlegend=False,
+                        ),
+                        row=2,
+                        col=1,
+                    )
+                else:
+                    fig.add_annotation(
+                        text="Volume data nahi mila",
+                        xref="x2 domain",
+                        yref="y2 domain",
+                        x=0.5,
+                        y=0.5,
+                        showarrow=False,
+                        font=dict(color="#8A93A6"),
+                        row=2,
+                        col=1,
+                    )
+
+                # --- Row 3: RSI ---
                 fig.add_trace(
                     go.Scatter(
                         x=chart_df["Date"],
@@ -1214,16 +1326,17 @@ if analyze_btn or ticker:
                         line=dict(color="purple", width=1.5),
                         name="RSI",
                     ),
-                    row=2,
+                    row=3,
                     col=1,
                 )
                 fig.add_hline(
-                    y=70, line_dash="dash", line_color="red", row=2, col=1
+                    y=70, line_dash="dash", line_color="red", row=3, col=1
                 )
                 fig.add_hline(
-                    y=30, line_dash="dash", line_color="green", row=2, col=1
+                    y=30, line_dash="dash", line_color="green", row=3, col=1
                 )
 
+                # --- Row 4: MACD ---
                 fig.add_trace(
                     go.Scatter(
                         x=chart_df["Date"],
@@ -1231,7 +1344,7 @@ if analyze_btn or ticker:
                         line=dict(color="blue", width=1.5),
                         name="MACD",
                     ),
-                    row=3,
+                    row=4,
                     col=1,
                 )
                 fig.add_trace(
@@ -1241,11 +1354,10 @@ if analyze_btn or ticker:
                         line=dict(color="orange", width=1.5, dash="dot"),
                         name="Signal",
                     ),
-                    row=3,
+                    row=4,
                     col=1,
                 )
-
-                colors = [
+                macd_colors = [
                     "green" if val >= 0 else "red"
                     for val in chart_df["MACD_Hist"]
                 ]
@@ -1253,24 +1365,44 @@ if analyze_btn or ticker:
                     go.Bar(
                         x=chart_df["Date"],
                         y=chart_df["MACD_Hist"],
-                        marker_color=colors,
+                        marker_color=macd_colors,
                         name="Histogram",
                     ),
-                    row=3,
+                    row=4,
                     col=1,
                 )
 
                 fig.update_layout(
                     xaxis_rangeslider_visible=False,
                     template="plotly_dark",
-                    height=750,
+                    height=900,
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
+                # S/R summary chips
+                col_s, col_r = st.columns(2)
+                with col_s:
+                    if supports:
+                        st.markdown(
+                            "**Support levels:** "
+                            + " · ".join([f"`{s}`" for s in supports])
+                        )
+                    else:
+                        st.caption("Support levels detect nahi hue.")
+                with col_r:
+                    if resistances:
+                        st.markdown(
+                            "**Resistance levels:** "
+                            + " · ".join([f"`{r}`" for r in resistances])
+                        )
+                    else:
+                        st.caption("Resistance levels detect nahi hue.")
+
                 st.caption(
                     f"Showing **{selected_tf}** data · "
-                    f"{'SMA Long visible' if show_sma200 else 'SMA Long hidden (insufficient bars)'} · "
-                    f"Bars: {len(chart_df)}"
+                    f"{'SMA Long visible' if show_sma200 else 'SMA Long hidden'} · "
+                    f"Bars: {len(chart_df)} · "
+                    f"S/R from swing highs/lows"
                 )
 
             # TAB 3: FUNDAMENTALS
