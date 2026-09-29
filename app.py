@@ -149,6 +149,86 @@ st.markdown(
         color: var(--td-coral);
         border: 1px solid rgba(240, 153, 123, 0.4);
     }
+
+    /* ===== Home Dashboard ===== */
+    .dash-hero {
+        background: linear-gradient(145deg, #10182b 0%, #0B1220 50%, #141B2E 100%);
+        border: 1px solid var(--td-border);
+        border-radius: 16px;
+        padding: 22px 24px 18px 24px;
+        margin-bottom: 16px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    }
+    .dash-title {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 1.55rem;
+        font-weight: 700;
+        color: var(--td-text);
+        margin: 0 0 4px 0;
+    }
+    .dash-sub {
+        color: var(--td-muted);
+        font-size: 0.92rem;
+        margin-bottom: 14px;
+    }
+    .feature-card {
+        background: var(--td-card);
+        border: 1px solid var(--td-border);
+        border-radius: 14px;
+        padding: 16px 14px;
+        height: 100%;
+        transition: border-color 0.2s, transform 0.15s;
+        min-height: 120px;
+    }
+    .feature-card:hover {
+        border-color: var(--td-amber);
+        transform: translateY(-2px);
+    }
+    .feature-icon {
+        font-size: 1.4rem;
+        margin-bottom: 8px;
+    }
+    .feature-title {
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        font-size: 0.98rem;
+        color: var(--td-text);
+        margin-bottom: 6px;
+    }
+    .feature-desc {
+        font-size: 0.82rem;
+        color: var(--td-muted);
+        line-height: 1.4;
+    }
+    .mode-pill {
+        display: inline-block;
+        padding: 6px 14px;
+        border-radius: 20px;
+        background: rgba(239, 159, 39, 0.12);
+        border: 1px solid rgba(239, 159, 39, 0.35);
+        color: var(--td-amber);
+        font-size: 0.8rem;
+        font-family: 'IBM Plex Mono', monospace;
+        margin-right: 6px;
+        margin-bottom: 6px;
+    }
+    .bottom-card {
+        background: linear-gradient(160deg, #141B2E 0%, #0f1729 100%);
+        border: 1px solid var(--td-border);
+        border-radius: 14px;
+        padding: 18px 16px;
+        min-height: 110px;
+    }
+    .bottom-card h4 {
+        font-family: 'Space Grotesk', sans-serif;
+        margin: 0 0 6px 0;
+        color: var(--td-text);
+    }
+    .bottom-card p {
+        margin: 0;
+        color: var(--td-muted);
+        font-size: 0.85rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -236,8 +316,12 @@ def save_portfolio(data):
 # Structure: { "TICKER": {"quantity": float, "buy_price": float}, ... }
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = load_portfolio()
-
-st.title("📈 AI Stock, News & Smart Entry Evaluator")
+if "dash_mode" not in st.session_state:
+    st.session_state.dash_mode = "Quick Insights"
+if "dash_query" not in st.session_state:
+    st.session_state.dash_query = ""
+if "focus_feature" not in st.session_state:
+    st.session_state.focus_feature = None
 
 
 # ----------------- LIVE SCROLLING TICKER TAPE -----------------
@@ -274,7 +358,114 @@ def render_ticker_tape():
     st.markdown(html, unsafe_allow_html=True)
 
 
+# ----------------- HOME DASHBOARD (screenshot-style) -----------------
+st.markdown(
+    """
+    <div class="dash-hero">
+        <div class="dash-title">📈 AI Stock Command Center</div>
+        <div class="dash-sub">Ask anything · Technicals · Fundamentals · Sentiment · Smart entry</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# AI-style search bar
+dash_q = st.text_input(
+    "Ask the market",
+    value=st.session_state.dash_query,
+    placeholder="e.g. Any negative rumors on RELIANCE? Should I buy TATAMOTORS at dip?",
+    key="dash_search_input",
+    label_visibility="collapsed",
+)
+if dash_q != st.session_state.dash_query:
+    st.session_state.dash_query = dash_q
+
+# Expert mode pills
+mode_cols = st.columns(5)
+modes = [
+    "Quick Insights",
+    "Technical Expert",
+    "Fundamental Guru",
+    "Sentiment Analyzer",
+    "Buy Advisor",
+]
+for i, mode in enumerate(modes):
+    with mode_cols[i]:
+        if st.button(
+            mode,
+            key=f"mode_btn_{i}",
+            use_container_width=True,
+            type="primary" if st.session_state.dash_mode == mode else "secondary",
+        ):
+            st.session_state.dash_mode = mode
+            st.rerun()
+
+st.caption(f"Active mode: **{st.session_state.dash_mode}** · Sidebar se stock select karke Analyze dabao")
+
+# Feature cards row
+st.markdown("")
+fc1, fc2, fc3, fc4 = st.columns(4)
+feature_defs = [
+    ("📊", "Technical Analysis", "Candles, RSI, MACD, Volume & S/R levels", "technicals", fc1),
+    ("🎯", "Should I Buy?", "Custom entry price, risk/reward & stop-loss", "buy", fc2),
+    ("🆚", "Compare Stocks", "Peers, valuation & AI best-pick suggestion", "compare", fc3),
+    ("🆕", "IPO Desk", "Open & upcoming IPOs with AI verdict", "ipo", fc4),
+]
+for icon, title, desc, key, col in feature_defs:
+    with col:
+        st.markdown(
+            f"""
+            <div class="feature-card">
+                <div class="feature-icon">{icon}</div>
+                <div class="feature-title">{title}</div>
+                <div class="feature-desc">{desc}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Open →", key=f"feat_{key}", use_container_width=True):
+            st.session_state.focus_feature = key
+            st.rerun()
+
+if st.session_state.focus_feature:
+    focus_map = {
+        "technicals": "Analyze stock → **📊 Price & Technicals** tab",
+        "buy": "Analyze stock → **💡 Buy/Sell Evaluator** tab",
+        "compare": "Analyze stock → **🆚 Compare & Suggest** tab",
+        "ipo": "Analyze stock → **🆕 IPO Suggestions** tab",
+    }
+    st.info(
+        f"👉 {focus_map.get(st.session_state.focus_feature, 'Analyze stock below.')} "
+        f"| Mode: **{st.session_state.dash_mode}**"
+    )
+
+# Ticker tape
 render_ticker_tape()
+
+# Bottom promo cards
+bc1, bc2 = st.columns(2)
+with bc1:
+    st.markdown(
+        """
+        <div class="bottom-card">
+            <h4>🤖 AI Stock Picker</h4>
+            <p>Watchlist + AI verdict se shortlist banao. Portfolio tab mein P/L track karo.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with bc2:
+    st.markdown(
+        """
+        <div class="bottom-card">
+            <h4>📈 Swing Desk</h4>
+            <p>Multi-timeframe charts, support/resistance aur RSI/MACD se swing zones dekho.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown("---")
 
 POPULAR_STOCKS = {
     "Reliance Industries": "RELIANCE.NS",
@@ -1619,8 +1810,14 @@ if analyze_btn or ticker:
                             pnl_pct = (
                                 (pnl / investment * 100) if investment > 0 else 0.0
                             )
+                            status = (
+                                "🟢 Profit"
+                                if pnl > 0
+                                else ("🔴 Loss" if pnl < 0 else "⚪ Flat")
+                            )
 
                             portfolio_rows.append({
+                                "Status": status,
                                 "Ticker": w_sym,
                                 "Quantity": qty,
                                 "Buy Price": buy_price,
@@ -1634,31 +1831,90 @@ if analyze_btn or ticker:
 
                     port_df = pd.DataFrame(portfolio_rows)
 
-                    edited_df = st.data_editor(
-                        port_df,
+                    # ----- Sort controls -----
+                    sort_col1, sort_col2 = st.columns([0.55, 0.45])
+                    with sort_col1:
+                        sort_by = st.selectbox(
+                            "Sort by",
+                            options=[
+                                "P/L % (High → Low)",
+                                "P/L % (Low → High)",
+                                "P/L (High → Low)",
+                                "P/L (Low → High)",
+                                "Ticker (A → Z)",
+                                "Investment (High → Low)",
+                            ],
+                            index=0,
+                            key="portfolio_sort_by",
+                        )
+                    with sort_col2:
+                        st.caption("🟢 Profit · 🔴 Loss · table me Quantity/Buy Price edit kar sakte ho")
+
+                    sort_map = {
+                        "P/L % (High → Low)": ("P/L %", False),
+                        "P/L % (Low → High)": ("P/L %", True),
+                        "P/L (High → Low)": ("P/L", False),
+                        "P/L (Low → High)": ("P/L", True),
+                        "Ticker (A → Z)": ("Ticker", True),
+                        "Investment (High → Low)": ("Investment", False),
+                    }
+                    col_name, ascending = sort_map[sort_by]
+                    port_df = port_df.sort_values(
+                        by=col_name, ascending=ascending
+                    ).reset_index(drop=True)
+
+                    # Color helpers for styled preview
+                    def _color_pnl(val):
+                        if not isinstance(val, (int, float)):
+                            return ""
+                        if val > 0:
+                            return "color: #5DCAA5; font-weight: 600"
+                        if val < 0:
+                            return "color: #F0997B; font-weight: 600"
+                        return "color: #8A93A6"
+
+                    styled = port_df.style.map(
+                        _color_pnl, subset=["P/L", "P/L %"]
+                    ).format({
+                        "Buy Price": "{:.2f}",
+                        "Current Price": "{:.2f}",
+                        "Investment": "{:,.2f}",
+                        "Current Value": "{:,.2f}",
+                        "P/L": "{:+,.2f}",
+                        "P/L %": "{:+.2f}%",
+                    })
+
+                    st.markdown("##### 📊 Live P/L Overview")
+                    st.dataframe(
+                        styled,
                         use_container_width=True,
                         hide_index=True,
-                        disabled=[
-                            "Ticker",
-                            "Current Price",
-                            "Currency",
-                            "Investment",
-                            "Current Value",
-                            "P/L",
-                            "P/L %",
-                        ],
+                    )
+
+                    st.markdown("##### ✏️ Edit Quantity / Buy Price")
+                    edit_df = port_df[
+                        ["Ticker", "Quantity", "Buy Price", "Current Price", "P/L %"]
+                    ].copy()
+                    edited_df = st.data_editor(
+                        edit_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        disabled=["Ticker", "Current Price", "P/L %"],
                         column_config={
                             "Quantity": st.column_config.NumberColumn(
                                 "Quantity", min_value=0.0, step=1.0
                             ),
                             "Buy Price": st.column_config.NumberColumn(
-                                "Buy Price", min_value=0.0, step=1.0
+                                "Buy Price", min_value=0.0, step=0.05, format="%.2f"
+                            ),
+                            "P/L %": st.column_config.NumberColumn(
+                                "P/L %", format="%+.2f%%"
                             ),
                         },
                         key="portfolio_editor",
                     )
 
-                    # Agar user ne table me quantity/buy price edit kiya hai, use save karo
+                    # Save edits
                     changed = False
                     for _, row in edited_df.iterrows():
                         sym = row["Ticker"]
@@ -1689,11 +1945,19 @@ if analyze_btn or ticker:
                         else 0.0
                     )
 
-                    m1, m2, m3, m4 = st.columns(4)
+                    winners = int((port_df["P/L"] > 0).sum())
+                    losers = int((port_df["P/L"] < 0).sum())
+
+                    m1, m2, m3, m4, m5 = st.columns(5)
                     m1.metric("Total Investment", f"{total_investment:,.2f}")
                     m2.metric("Current Value", f"{total_current_value:,.2f}")
-                    m3.metric("Total P/L", f"{total_pnl:,.2f}")
-                    m4.metric("Total P/L %", f"{total_pnl_pct:+.2f}%")
+                    m3.metric(
+                        "Total P/L",
+                        f"{total_pnl:,.2f}",
+                        delta=f"{total_pnl_pct:+.2f}%",
+                    )
+                    m4.metric("Winners", f"🟢 {winners}")
+                    m5.metric("Losers", f"🔴 {losers}")
 
             # TAB 8: IPO SUGGESTIONS
             with tab8:
